@@ -1,0 +1,11 @@
+langchain>=0.3
+langchain-ollama
+langchain-core
+langgraph
+codecarbon
+matplotlib
+numpy
+scipy
+pandas
+tabulate
+pydantic
