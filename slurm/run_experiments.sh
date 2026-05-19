@@ -25,11 +25,6 @@
 #   sbatch slurm/run_experiment_05_mistral.sh        # 2x A100 (large model)
 #   sbatch slurm/run_experiment_06_gemma4.sh
 #
-# IMPORTANT — Experiment 05 in the array:
-#   `mistral-large:latest` is ~73 GB on disk and will not fit on a single
-#   A100-40GB. If you submit exp 05 via this array (1 GPU per task) it
-#   will likely OOM at inference time. Prefer the standalone script
-#   `run_experiment_05_mistral.sh` which requests 2 GPUs.
 # ============================================================================
 
 #SBATCH --job-name=gao-experiments
@@ -86,7 +81,7 @@ case "${SLURM_ARRAY_TASK_ID:-1}" in
     run_gao_experiment \
         "05_mistral" \
         "configs/experiments/05_mistral.yaml" \
-        mistral-large:latest ministral-3:14b ministral-3:8b ministral-3:3b
+        mistral-small:24b ministral-3:14b ministral-3:8b ministral-3:3b
     ;;
   6)
     run_gao_experiment \

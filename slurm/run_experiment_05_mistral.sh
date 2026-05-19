@@ -2,18 +2,15 @@
 # ============================================================================
 # GAO — Standalone runner for experiment 05_mistral
 # ============================================================================
-# This experiment uses `mistral-large:latest` as the homogeneous baseline.
-# That model is ~73 GB on disk, so it cannot fit on a single A100-40GB.
-# We therefore request 2 GPUs and bump CPU memory accordingly. The
-# heterogeneous worker pool uses the Ministral-3 family (3B/8B/14B),
-# which is small enough that the bottleneck is the homogeneous model.
+# Mistral 2026 lineup: Mistral Small 3 (24B) as the homogeneous baseline,
+# Ministral-3 (3B / 8B / 14B) as the heterogeneous worker pool. All four
+# checkpoints fit on a single A100-40GB at Q4_K_M.
 #
 # Submit with:
 #   sbatch slurm/run_experiment_05_mistral.sh
 #
-# NOTE: This experiment is intentionally NOT a 1-GPU array task — running
-# it via `sbatch --array=5 slurm/run_experiments.sh` (1 GPU) will most
-# likely OOM at inference time.
+# Equivalent to:
+#   sbatch --array=5 slurm/run_experiments.sh
 # ============================================================================
 
 #SBATCH --job-name=gao-exp05
@@ -22,9 +19,9 @@
 #SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:a100:2
-#SBATCH --mem=160G
+#SBATCH --cpus-per-task=8
+#SBATCH --gres=gpu:a100:1
+#SBATCH --mem=80G
 #SBATCH --output=slurm/logs/exp05_%j.out
 #SBATCH --error=slurm/logs/exp05_%j.err
 
@@ -43,4 +40,4 @@ source "${SCRIPT_DIR}/_run_experiment_common.sh"
 run_gao_experiment \
     "05_mistral" \
     "configs/experiments/05_mistral.yaml" \
-    mistral-large:latest ministral-3:14b ministral-3:8b ministral-3:3b
+    mistral-small:24b ministral-3:14b ministral-3:8b ministral-3:3b

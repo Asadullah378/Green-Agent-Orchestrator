@@ -12,7 +12,7 @@ at CSC, using project `project_2013898`.
 | 02_qwen3.5_homo_9b | Ollama | `--array=2` | `run_experiment_02_qwen3.5_homo_9b.sh` |
 | 03_qwen3.5_homo_4b | Ollama | `--array=3` | `run_experiment_03_qwen3.5_homo_4b.sh` |
 | 04_qwen3.5_llamacpp | llama.cpp + llama-swap | — | `run_experiment_04_llamacpp.sh` |
-| 05_mistral | Ollama | `--array=5` (1 GPU) | `run_experiment_05_mistral.sh` (**2 GPUs**) |
+| 05_mistral | Ollama | `--array=5` | `run_experiment_05_mistral.sh` |
 | 06_gemma4 | Ollama | `--array=6` | `run_experiment_06_gemma4.sh` |
 
 Experiments 1, 2, 3, 5, 6 can be submitted together as a single SLURM
@@ -40,18 +40,6 @@ sbatch slurm/run_experiment_06_gemma4.sh
 # llama.cpp experiment (separate stack)
 sbatch slurm/run_experiment_04_llamacpp.sh
 ```
-
-### ⚠ Experiment 05 needs 2 GPUs
-
-`mistral-large:latest` is ~73 GB on disk and **will not fit on a single
-A100-40GB**. Always submit exp 05 via the standalone script:
-
-```bash
-sbatch slurm/run_experiment_05_mistral.sh   # requests --gres=gpu:a100:2
-```
-
-Submitting exp 05 through the 1-GPU array (`sbatch --array=5
-slurm/run_experiments.sh`) will most likely OOM at inference time.
 
 ## Output layout
 
@@ -130,7 +118,7 @@ be claimed at full 4-GPU width.
 | 02 | qwen3.5:9b | ~7 GB | |
 | 03 | qwen3.5:9b (worker) | ~7 GB | Hetero pool still includes 9B. |
 | 04 | qwen3.5-27b GGUF q4 | ~17 GB | Same as exp 01, but via llama.cpp. |
-| 05 | mistral-large:latest | ~70 GB | **Requires 2× A100.** Use the standalone script. |
+| 05 | mistral-small:24b | ~14 GB | Fits on one A100. |
 | 06 | gemma4:31b | ~20 GB | Fits on one A100. |
 
 ## Ollama model names
@@ -141,7 +129,7 @@ tags when adding new experiments:
 | Family | Wrong name | Correct Ollama tag |
 |---|---|---|
 | Ministral (3B / 8B / 14B) | `ministral:3b` | `ministral-3:3b` |
-| Mistral Large (latest, ~73 GB q4) | — | `mistral-large:latest` |
+| Mistral Small 3 (24B) | — | `mistral-small:24b` |
 | Gemma 4 edge models | `gemma4:e2b` | (correct, kept as-is) |
 
 ## Re-running just the analysis
