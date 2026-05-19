@@ -64,8 +64,17 @@ echo "  config  : ${CONFIG}"
 echo "  started : $(date)"
 echo "================================================================"
 
-module load apptainer
-module load python-data
+# Apptainer is available natively on Mahti; the legacy `apptainer` module
+# was removed. We still try to load the modules in case they reappear, but
+# we don't fail the job if they are missing — we only fail if the
+# `apptainer` binary itself is not on PATH.
+module load apptainer 2>/dev/null || true
+module load python-data 2>/dev/null || true
+
+if ! command -v apptainer >/dev/null 2>&1; then
+    echo "ERROR: apptainer not found on PATH. Check Mahti environment." >&2
+    exit 1
+fi
 
 PROJECT_DIR="/scratch/project_2013898/ollama_env"
 LLAMACPP_SIF="${PROJECT_DIR}/llamacpp.sif"
