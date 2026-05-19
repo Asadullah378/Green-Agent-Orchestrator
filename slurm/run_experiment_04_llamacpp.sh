@@ -29,10 +29,11 @@
 #      a separate `gguf/` subfolder so they don't collide with the Ollama
 #      blobs already under `models/`.
 #
-#   3. On Mahti, edit configs/experiments/04_qwen3.5_llamacpp.swap.yaml so
-#      every `--model` path points at the Mahti scratch location, e.g.
-#          /scratch/project_2013898/ollama_env/gguf/qwen3.5/qwen3.5-27b-instruct-q4_k_m.gguf
-#      The repo copy uses macOS dev paths because it is also used locally.
+#   3. No manual edit of configs/experiments/04_qwen3.5_llamacpp.swap.yaml
+#      is required. The repo copy keeps macOS dev paths so it stays usable
+#      on a laptop. This script renders a Mahti-flavoured copy on the fly
+#      under ${PROJECT_DIR}/run_artifacts/exp04_<jobid>/ and passes that
+#      one to llama-swap.
 #
 # Submit with:
 #   sbatch slurm/run_experiment_04_llamacpp.sh
@@ -88,26 +89,79 @@ mkdir -p "${CONTAINER_HOME}"
 cd "${REPO_DIR}"
 mkdir -p slurm/logs
 
+REQUIRED_GGUFS=(
+    qwen3.5-2b-instruct-q4_k_m.gguf
+    qwen3.5-4b-instruct-q4_k_m.gguf
+    qwen3.5-9b-instruct-q4_k_m.gguf
+    qwen3.5-27b-instruct-q4_k_m.gguf
+)
+
 # Sanity-check that the GGUF files and image are actually present, since
 # llama-swap's failure mode for a missing model is a confusing
 # "process exited with status 1" several minutes into the run.
-for f in qwen3.5-2b-instruct-q4_k_m.gguf \
-         qwen3.5-4b-instruct-q4_k_m.gguf \
-         qwen3.5-9b-instruct-q4_k_m.gguf \
-         qwen3.5-27b-instruct-q4_k_m.gguf; do
+missing=0
+for f in "${REQUIRED_GGUFS[@]}"; do
     if [[ ! -f "${GGUF_DIR}/${f}" ]]; then
         echo "ERROR: missing GGUF file ${GGUF_DIR}/${f}" >&2
-        exit 1
+        missing=1
     fi
 done
+if [[ "${missing}" -ne 0 ]]; then
+    cat >&2 <<EOF
+
+One or more Qwen 3.5 GGUF checkpoints are missing. Download them on a
+login node (compute nodes have no outbound internet) e.g. with:
+
+  module load python-data
+  pip install --user huggingface_hub
+  mkdir -p ${GGUF_DIR}
+  cd ${GGUF_DIR}
+  for tag in 2b 4b 9b 27b; do
+      huggingface-cli download bartowski/Qwen3.5-\${tag}-Instruct-GGUF \\
+          "Qwen3.5-\${tag}-Instruct-Q4_K_M.gguf" \\
+          --local-dir . --local-dir-use-symlinks False
+      # Normalise the filename to the lowercase convention this script expects:
+      mv "Qwen3.5-\${tag}-Instruct-Q4_K_M.gguf" "qwen3.5-\${tag}-instruct-q4_k_m.gguf"
+  done
+
+(Adjust the source repo if you prefer a different GGUF re-packager.)
+EOF
+    exit 1
+fi
 if [[ ! -f "${LLAMACPP_SIF}" ]]; then
     echo "ERROR: missing Apptainer image ${LLAMACPP_SIF}" >&2
     exit 1
 fi
 
 # ---------------------------------------------------------------------------
+# Render a Mahti-flavoured copy of the swap config.
+#
+# The repo-tracked configs/experiments/04_qwen3.5_llamacpp.swap.yaml is
+# intentionally kept with macOS dev paths so it is usable for local
+# development on a laptop. On Mahti we rewrite every `--model` path to
+# point at the scratch GGUF directory, and stage the result in a
+# per-job artifacts folder so concurrent submissions don't clobber each
+# other.
+# ---------------------------------------------------------------------------
+ARTIFACT_DIR="${PROJECT_DIR}/run_artifacts/exp04_${SLURM_JOB_ID:-local}"
+mkdir -p "${ARTIFACT_DIR}"
+RENDERED_SWAP_CONFIG="${ARTIFACT_DIR}/04_qwen3.5_llamacpp.swap.yaml"
+
+# Replace any "/Users/<name>/models/qwen3.5/" or "~/models/qwen3.5/" prefix
+# with the Mahti GGUF directory. Both spellings are supported so the repo
+# copy can be edited freely without breaking the HPC run.
+sed -E \
+    -e "s#/Users/[^/]+/models/qwen3\.5/#${GGUF_DIR}/#g" \
+    -e "s#~/models/qwen3\.5/#${GGUF_DIR}/#g" \
+    "${REPO_DIR}/${SWAP_CONFIG}" > "${RENDERED_SWAP_CONFIG}"
+
+echo "Rendered llama-swap config (paths rewritten for Mahti):"
+echo "  ${RENDERED_SWAP_CONFIG}"
+grep -E "^\s*--model" "${RENDERED_SWAP_CONFIG}" || true
+
+# ---------------------------------------------------------------------------
 # Start llama-swap inside Apptainer. llama-swap will spawn llama-server
-# instances on demand using the commands declared in ${SWAP_CONFIG}.
+# instances on demand using the commands declared in the rendered config.
 # ---------------------------------------------------------------------------
 echo "Starting llama-swap proxy on :8080…"
 apptainer run --nv \
@@ -115,7 +169,7 @@ apptainer run --nv \
     --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
     "${LLAMACPP_SIF}" \
     llama-swap \
-        --config "${REPO_DIR}/${SWAP_CONFIG}" \
+        --config "${RENDERED_SWAP_CONFIG}" \
         --listen :8080 &
 SWAP_PID=$!
 
