@@ -38,7 +38,13 @@ LLAMACPP_SIF="${LLAMACPP_SIF:-${PROJECT_DIR}/llamacpp.sif}"
 LLAMA_SWAP_BIN="${LLAMA_SWAP_BIN:-${PROJECT_DIR}/bin/llama-swap}"
 
 LLAMACPP_IMAGE="${LLAMACPP_IMAGE:-docker://ghcr.io/ggml-org/llama.cpp:server-cuda}"
-LLAMA_SWAP_VERSION="${LLAMA_SWAP_VERSION:-v167}"
+# Pin to a known-good llama-swap release. Bump as needed — see
+# https://github.com/mostlygeek/llama-swap/releases for the current tag.
+LLAMA_SWAP_VERSION="${LLAMA_SWAP_VERSION:-v216}"
+# Path inside the ggml-org llama.cpp Docker image where `llama-server` lives.
+# Verified by the smoke test below and used by run_experiment_04_llamacpp.sh
+# (which sets PATH=${LLAMA_SERVER_DIR}:... inside the container).
+LLAMA_SERVER_DIR_DEFAULT="/app"
 
 mkdir -p "${PROJECT_DIR}" "$(dirname "${LLAMA_SWAP_BIN}")"
 
@@ -71,22 +77,57 @@ else
 fi
 echo
 
-# Quick smoke test: does `llama-server --version` work inside the image?
-echo "Smoke-test llama-server inside the image:"
-apptainer exec --nv "${LLAMACPP_SIF}" llama-server --version 2>&1 | head -5 || {
-    echo "WARNING: llama-server failed to report its version. The image" >&2
-    echo "may be missing CUDA libs or have a different binary name." >&2
-}
+# Quick smoke test: find `llama-server` inside the image. The ggml-org
+# server-cuda image installs it at /app/llama-server and uses it as the
+# ENTRYPOINT, so `apptainer exec` (which bypasses ENTRYPOINT) doesn't see
+# it on $PATH. We try the known location first, then fall back to a
+# filesystem search so we have a hope of discovering future re-locations.
+echo "Locating llama-server inside the image…"
+LLAMA_SERVER_PATH=""
+for candidate in "${LLAMA_SERVER_DIR_DEFAULT}/llama-server" \
+                  /usr/local/bin/llama-server \
+                  /usr/bin/llama-server; do
+    if apptainer exec "${LLAMACPP_SIF}" test -x "${candidate}" 2>/dev/null; then
+        LLAMA_SERVER_PATH="${candidate}"
+        break
+    fi
+done
+if [[ -z "${LLAMA_SERVER_PATH}" ]]; then
+    LLAMA_SERVER_PATH="$(apptainer exec "${LLAMACPP_SIF}" \
+        find / -maxdepth 5 -type f -name llama-server 2>/dev/null | head -1)"
+fi
+
+if [[ -z "${LLAMA_SERVER_PATH}" ]]; then
+    echo "ERROR: could not locate a llama-server binary inside ${LLAMACPP_SIF}." >&2
+    echo "       The image may have changed its layout — please inspect with:" >&2
+    echo "         apptainer exec ${LLAMACPP_SIF} ls -l /app /usr/local/bin /usr/bin" >&2
+    exit 1
+fi
+echo "✓ llama-server found at ${LLAMA_SERVER_PATH} (inside container)"
+apptainer exec "${LLAMACPP_SIF}" "${LLAMA_SERVER_PATH}" --version 2>&1 | head -3 || true
 echo
 
 # ----------------------------------------------------------------------------
 # Step 2 — download the llama-swap binary
 # ----------------------------------------------------------------------------
-if [[ -x "${LLAMA_SWAP_BIN}" ]]; then
+_is_elf() {
+    # First four bytes of any Linux ELF executable are 0x7F 'E' 'L' 'F'.
+    [[ "$(head -c 4 "$1" 2>/dev/null | od -An -c 2>/dev/null | tr -d ' ')" == "177ELF" ]]
+}
+
+if [[ -x "${LLAMA_SWAP_BIN}" ]] && _is_elf "${LLAMA_SWAP_BIN}"; then
     echo "✓ ${LLAMA_SWAP_BIN} already exists — skipping download."
     ls -lh "${LLAMA_SWAP_BIN}"
 else
-    asset_url="https://github.com/mostlygeek/llama-swap/releases/download/${LLAMA_SWAP_VERSION}/llama-swap_${LLAMA_SWAP_VERSION#v}_linux_amd64.tar.gz"
+    # Remove any stale/corrupt file from a previous failed run so the
+    # `[[ -x ... ]]` guard above doesn't keep skipping it forever.
+    if [[ -e "${LLAMA_SWAP_BIN}" ]]; then
+        echo "Removing stale ${LLAMA_SWAP_BIN} (not a valid ELF)…"
+        rm -f "${LLAMA_SWAP_BIN}"
+    fi
+
+    asset_name="llama-swap_${LLAMA_SWAP_VERSION#v}_linux_amd64.tar.gz"
+    asset_url="https://github.com/mostlygeek/llama-swap/releases/download/${LLAMA_SWAP_VERSION}/${asset_name}"
     echo "Downloading llama-swap ${LLAMA_SWAP_VERSION}"
     echo "      from ${asset_url}"
     echo "      to   ${LLAMA_SWAP_BIN}"
@@ -94,38 +135,61 @@ else
     tmpdir="$(mktemp -d)"
     trap 'rm -rf "${tmpdir}"' EXIT
 
-    if ! curl -fsSL "${asset_url}" -o "${tmpdir}/llama-swap.tar.gz"; then
+    if ! curl -fsSL --retry 3 "${asset_url}" -o "${tmpdir}/${asset_name}"; then
         cat >&2 <<EOF
 ERROR: failed to download ${asset_url}
 
-The release-asset naming for llama-swap occasionally changes. Visit
+The release-asset naming for llama-swap occasionally changes, or the
+version you asked for ('${LLAMA_SWAP_VERSION}') may not exist. Visit
     https://github.com/mostlygeek/llama-swap/releases
-to find the correct linux_amd64 tarball and re-run with:
+to find a valid Linux x86_64 tarball and re-run with:
 
     LLAMA_SWAP_VERSION=<tag> bash slurm/setup_llamacpp_env.sh
 EOF
         exit 1
     fi
 
-    tar -xzf "${tmpdir}/llama-swap.tar.gz" -C "${tmpdir}"
-    # The tarball contains a single statically-linked binary, usually
-    # named just `llama-swap`. Pick the first executable file we find
-    # to be tolerant of naming changes.
-    extracted="$(find "${tmpdir}" -maxdepth 2 -type f -name 'llama-swap*' | head -1)"
+    echo "  fetched $(du -h "${tmpdir}/${asset_name}" | cut -f1)"
+    tar -xzf "${tmpdir}/${asset_name}" -C "${tmpdir}"
+
+    # Find the actual `llama-swap` binary in the extracted tree. Prefer
+    # an exact filename match (the tarball ships docs/checksums too);
+    # fall back to any executable named llama-swap*.
+    extracted="$(find "${tmpdir}" -type f -name 'llama-swap' | head -1)"
+    if [[ -z "${extracted}" ]]; then
+        extracted="$(find "${tmpdir}" -type f -name 'llama-swap*' \
+            -not -name '*.txt' -not -name '*.md' -not -name '*.tar.gz' \
+            | head -1)"
+    fi
     if [[ -z "${extracted}" ]]; then
         echo "ERROR: could not locate llama-swap binary inside the tarball." >&2
+        echo "Tarball contents:" >&2
+        find "${tmpdir}" -mindepth 1 -maxdepth 3 -ls >&2
         exit 1
     fi
     install -m 0755 "${extracted}" "${LLAMA_SWAP_BIN}"
     trap - EXIT
     rm -rf "${tmpdir}"
-    echo "✓ installed $(du -h "${LLAMA_SWAP_BIN}" | cut -f1)"
+    echo "✓ installed $(du -h "${LLAMA_SWAP_BIN}" | cut -f1) at ${LLAMA_SWAP_BIN}"
+fi
+
+# Hard-validate: the binary must be a Linux x86_64 ELF, otherwise the
+# SLURM job will fail much later with a useless "Exec format error".
+if ! _is_elf "${LLAMA_SWAP_BIN}"; then
+    echo "ERROR: ${LLAMA_SWAP_BIN} is not an ELF binary." >&2
+    echo "       The downloaded asset was probably an error page or the" >&2
+    echo "       wrong architecture. Inspect with: file ${LLAMA_SWAP_BIN}" >&2
+    rm -f "${LLAMA_SWAP_BIN}"
+    exit 1
 fi
 echo
 
 echo "Smoke-test llama-swap:"
-"${LLAMA_SWAP_BIN}" --version 2>&1 | head -5 || \
-    echo "(no --version flag on this build; that's fine)"
+if "${LLAMA_SWAP_BIN}" --version 2>&1 | head -3; then
+    :
+else
+    echo "(no --version flag on this build; that's fine — the ELF check passed)"
+fi
 echo
 
 # ----------------------------------------------------------------------------

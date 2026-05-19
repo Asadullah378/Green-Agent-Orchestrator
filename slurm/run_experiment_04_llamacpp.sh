@@ -183,11 +183,18 @@ grep -E "^\s*--model" "${RENDERED_SWAP_CONFIG}" || true
 # path via the ${PROJECT_DIR} bind mount, so we just invoke it by its
 # absolute host path. The `llama-server` subprocesses it spawns are
 # the ones baked into ${LLAMACPP_SIF} (with CUDA support).
+#
+# IMPORTANT: the ggml-org llama.cpp:server-cuda image installs
+# llama-server at /app/llama-server and exposes it via ENTRYPOINT —
+# `apptainer exec`/`run` bypass ENTRYPOINT, so /app is not on $PATH
+# by default. We add it explicitly so llama-swap's `cmd: llama-server`
+# entries (declared in the rendered swap config) resolve correctly.
 # ---------------------------------------------------------------------------
 echo "Starting llama-swap proxy on :8080…"
 apptainer run --nv \
     --home "${CONTAINER_HOME}:/root" \
     --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+    --env "PATH=/app:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     "${LLAMACPP_SIF}" \
     "${LLAMA_SWAP_BIN}" \
         --config "${RENDERED_SWAP_CONFIG}" \
