@@ -14,7 +14,7 @@ from typing import Generator
 
 from codecarbon import OfflineEmissionsTracker
 
-from src.config import CODECARBON_LOG_LEVEL, COUNTRY_ISO_CODE, RESULTS_DIR
+from src.config import get_config
 
 
 @dataclass
@@ -85,12 +85,13 @@ def track_energy(label: str = "task") -> Generator[TrackingResult, None, None]:
             ... do work ...
         print(result.energy_kwh)
     """
+    cfg = get_config()
     result = TrackingResult()
     tracker = OfflineEmissionsTracker(
-        country_iso_code=COUNTRY_ISO_CODE,
-        log_level=CODECARBON_LOG_LEVEL,
-        tracking_mode="process",
-        output_dir=RESULTS_DIR,
+        country_iso_code=cfg.energy.country_iso_code,
+        log_level=cfg.energy.log_level,
+        tracking_mode=cfg.energy.tracking_mode,
+        output_dir=cfg.experiment.results_dir,
         project_name=label,
         save_to_file=False,
     )

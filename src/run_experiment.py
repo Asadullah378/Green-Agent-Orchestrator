@@ -2,16 +2,17 @@
 Green Agent Orchestrator (GAO) — Main experiment runner
 
 Runs all benchmark tasks through both flows, records energy / accuracy /
-timing, and writes results to JSON + CSV.  After saving, automatically
+timing, and writes results to JSON + CSV. After saving, automatically
 runs the analysis pipeline to generate paper-ready figures and tables.
 
 Usage:
-    python -m src.run_experiment                          # full run (all tasks, 3 runs)
-    python -m src.run_experiment --flow homogeneous        # one flow only
-    python -m src.run_experiment --tasks E1 E2             # specific tasks
-    python -m src.run_experiment --difficulty easy          # all easy tasks
-    python -m src.run_experiment --runs 1                   # single repetition
-    python -m src.run_experiment -v                         # verbose agent logs
+    python -m src.run_experiment                          # full run with default config
+    python -m src.run_experiment --config configs/llama3.yaml
+    python -m src.run_experiment --flow homogeneous       # one flow only
+    python -m src.run_experiment --tasks E1 E2            # specific tasks
+    python -m src.run_experiment --difficulty easy        # all easy tasks
+    python -m src.run_experiment --runs 1                 # override num_runs
+    python -m src.run_experiment -v                       # verbose agent logs
 """
 
 from __future__ import annotations
@@ -25,30 +26,50 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import pandas as pd
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.agents import homogeneous, heterogeneous
-from src.benchmark.evaluators import evaluate_record
-from src.benchmark.tasks import BENCHMARK_TASKS, get_tasks_by_difficulty
-from src.config import (
-    HOMOGENEOUS_MODEL,
-    ORCHESTRATOR_MODEL,
-    HETEROGENEOUS_POOL,
-    NUM_RUNS,
-    RESULTS_DIR,
-)
-from src.tracking import TaskRecord
+
+def _preload_config(argv: list[str]) -> None:
+    """Resolve `--config PATH` from argv and load it before importing modules
+    that depend on the active config at import time.
+    """
+    cfg_path = None
+    for i, tok in enumerate(argv):
+        if tok == "--config" and i + 1 < len(argv):
+            cfg_path = argv[i + 1]
+            break
+        if tok.startswith("--config="):
+            cfg_path = tok.split("=", 1)[1]
+            break
+    if cfg_path:
+        os.environ["GAO_CONFIG"] = cfg_path
+
+    from src.config import load_config, get_loaded_path
+    load_config(cfg_path) if cfg_path else load_config()
+    print(f"  Config     : {get_loaded_path()}")
 
 
-def _ensure_results_dir():
-    os.makedirs(RESULTS_DIR, exist_ok=True)
+_preload_config(sys.argv[1:])
+
+import pandas as pd  # noqa: E402
+
+from src.agents import homogeneous, heterogeneous  # noqa: E402
+from src.benchmark.evaluators import evaluate_record  # noqa: E402
+from src.benchmark.tasks import BENCHMARK_TASKS, get_tasks_by_difficulty  # noqa: E402
+from src.config import get_config  # noqa: E402
+from src.tracking import TaskRecord  # noqa: E402
+
+
+def _ensure_results_dir() -> str:
+    results_dir = get_config().experiment.results_dir
+    os.makedirs(results_dir, exist_ok=True)
+    return results_dir
 
 
 def _collect_metadata() -> dict:
-    """Capture system and configuration info for reproducibility."""
+    """Capture system + active config so every result file is self-describing."""
     import codecarbon
+    cfg = get_config()
 
     return {
         "timestamp": datetime.now().isoformat(),
@@ -56,9 +77,13 @@ def _collect_metadata() -> dict:
         "processor": platform.processor(),
         "python_version": platform.python_version(),
         "codecarbon_version": codecarbon.__version__,
-        "homogeneous_model": HOMOGENEOUS_MODEL,
-        "orchestrator_model": ORCHESTRATOR_MODEL,
-        "heterogeneous_pool": list(HETEROGENEOUS_POOL.keys()),
+        "config_path": cfg.source_path,
+        "config": cfg.raw,
+        # Convenience aliases used by older analysis code
+        "homogeneous_model": cfg.homogeneous.model,
+        "orchestrator_model": cfg.heterogeneous.orchestrator.model,
+        "synthesizer_model": cfg.heterogeneous.synthesizer.model,
+        "heterogeneous_pool": [w.model for w in cfg.heterogeneous.workers],
     }
 
 
@@ -77,18 +102,12 @@ def run_single(
     record = runner.run_task(task["id"], task["query"], run_idx, verbose=verbose)
     record.accuracy_score = evaluate_record(record)
     elapsed = time.perf_counter() - t0
-    if verbose:
-        print(
-            f"  ✓  acc={record.accuracy_score:.2f}  "
-            f"energy={record.tracking.energy_kwh:.6f} kWh  "
-            f"time={elapsed:.1f}s"
-        )
-    else:
-        print(
-            f"✓  acc={record.accuracy_score:.2f}  "
-            f"energy={record.tracking.energy_kwh:.6f} kWh  "
-            f"time={elapsed:.1f}s"
-        )
+    msg = (
+        f"✓  acc={record.accuracy_score:.2f}  "
+        f"energy={record.tracking.energy_kwh:.6f} kWh  "
+        f"time={elapsed:.1f}s"
+    )
+    print(f"  {msg}" if verbose else msg)
     return record
 
 
@@ -113,13 +132,11 @@ def run_experiment(
 
     results: list[dict] = []
 
-    # Alternate flows per task so both see the same thermal/cache conditions.
-    # Order: for each task, for each run, run every flow back-to-back.
     try:
         for task in tasks:
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"  TASK: {task['id']} — {task['description']}")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
             for run_idx in range(num_runs):
                 for flow in flows:
                     record = run_single(flow, task, run_idx, verbose=verbose)
@@ -131,13 +148,18 @@ def run_experiment(
 
 
 def save_results(results: list[dict], tag: str = "") -> tuple[str, str]:
-    """Persist results as JSON (with metadata) and CSV."""
-    _ensure_results_dir()
+    """Persist results as JSON (with full metadata) and CSV."""
+    results_dir = _ensure_results_dir()
+    cfg = get_config()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    stem = f"results_{tag}_{ts}" if tag else f"results_{ts}"
+    stem_parts = ["results", cfg.experiment.name]
+    if tag:
+        stem_parts.append(tag)
+    stem_parts.append(ts)
+    stem = "_".join(p for p in stem_parts if p)
 
-    json_path = os.path.join(RESULTS_DIR, f"{stem}.json")
-    csv_path = os.path.join(RESULTS_DIR, f"{stem}.csv")
+    json_path = os.path.join(results_dir, f"{stem}.json")
+    csv_path = os.path.join(results_dir, f"{stem}.csv")
 
     payload = {
         "metadata": _collect_metadata(),
@@ -154,7 +176,7 @@ def save_results(results: list[dict], tag: str = "") -> tuple[str, str]:
     return json_path, csv_path
 
 
-def print_summary(results: list[dict]):
+def print_summary(results: list[dict]) -> None:
     """Print a quick comparison table to stdout."""
     df = pd.DataFrame(results)
     if df.empty:
@@ -174,9 +196,9 @@ def print_summary(results: list[dict]):
         )
         .round(6)
     )
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("  EXPERIMENT SUMMARY")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(summary.to_string())
 
     if {"homogeneous", "heterogeneous"}.issubset(set(df["flow"])):
@@ -200,9 +222,9 @@ def print_summary(results: list[dict]):
         )
         .round(6)
     )
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("  PER-DIFFICULTY BREAKDOWN")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(diff_summary.to_string())
 
 
@@ -210,7 +232,17 @@ def print_summary(results: list[dict]):
 
 
 def main():
+    cfg = get_config()
     parser = argparse.ArgumentParser(description="GAO experiment runner")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help=(
+            "Path to a YAML config file. Defaults to "
+            "configs/experiments/01_qwen3.5_default.yaml unless GAO_CONFIG "
+            "is set."
+        ),
+    )
     parser.add_argument(
         "--flow",
         choices=["homogeneous", "heterogeneous", "both"],
@@ -232,8 +264,8 @@ def main():
     parser.add_argument(
         "--runs",
         type=int,
-        default=NUM_RUNS,
-        help=f"Repetitions per task (default: {NUM_RUNS})",
+        default=cfg.experiment.num_runs,
+        help=f"Repetitions per task (default from config: {cfg.experiment.num_runs})",
     )
     parser.add_argument(
         "--tag",
@@ -263,6 +295,9 @@ def main():
     print("╔══════════════════════════════════════════════════════════╗")
     print("║   Green Agent Orchestrator — Experiment Runner          ║")
     print("╚══════════════════════════════════════════════════════════╝")
+    print(f"  Experiment : {cfg.experiment.name}")
+    print(f"  Homo model : {cfg.homogeneous.model}")
+    print(f"  Hetero pool: {[w.model for w in cfg.heterogeneous.workers]}")
     print(f"  Flows      : {flows}")
     print(f"  Tasks      : {args.tasks or args.difficulty or 'ALL'}")
     print(f"  Runs       : {args.runs}")
@@ -277,9 +312,9 @@ def main():
         print_summary(results)
 
         if not args.no_analyze:
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print("  GENERATING ANALYSIS & FIGURES")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
             from src.analyze_results import run_analysis
             run_analysis(json_path)
 

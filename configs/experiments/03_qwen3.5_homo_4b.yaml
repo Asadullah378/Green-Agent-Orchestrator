@@ -1,0 +1,99 @@
+# ============================================================================
+# Experiment 03 — Qwen 3.5 with a 4B homogeneous baseline
+# ============================================================================
+# Ablation study: further shrinks the homogeneous baseline to 4B while the
+# heterogeneous pool is unchanged. The baseline is now SMALLER than the
+# largest worker in the hetero pool (9B). Expected outcome: hetero may lose
+# its energy advantage (since some sub-tasks route to 9B) but may keep an
+# accuracy advantage on hard tasks. This is the point at which we expect
+# the cross-over to occur.
+#
+# Run:
+#   python -m src.run_experiment --config configs/experiments/03_qwen3.5_homo_4b.yaml
+# ============================================================================
+
+experiment:
+  name: "03_qwen3.5_homo_4b"
+  num_runs: 7
+  results_dir: "results/03_qwen3.5_homo_4b"
+
+llm:
+  provider: "ollama"
+  request_timeout: 240
+  temperature: 0.0
+  reasoning: false
+
+  ollama:
+    base_url: "http://localhost:11434"
+
+  llamacpp:
+    base_url: "http://localhost:8080/v1"
+    api_key: "no-key"
+
+energy:
+  country_iso_code: "FIN"
+  log_level: "error"
+  tracking_mode: "process"
+
+homogeneous:
+  model: "qwen3.5:4b"           # ↓↓ from 27B
+  size_b: 4
+  max_agent_steps: 40
+
+heterogeneous:
+  orchestrator:
+    model: "qwen3.5:4b"
+    size_b: 4
+
+  synthesizer:
+    model: "qwen3.5:2b"
+    size_b: 2
+
+  workers:
+    - tier: "small"
+      model: "qwen3.5:2b"
+      size_b: 2
+      max_steps: 10
+      description: "Simple subtasks — 1 to 2 total tool invocations."
+    - tier: "medium"
+      model: "qwen3.5:4b"
+      size_b: 4
+      max_steps: 15
+      description: "Moderate subtasks — 3 to 5 tool invocations or multi-step math."
+    - tier: "large"
+      model: "qwen3.5:9b"
+      size_b: 9
+      max_steps: 25
+      description: "Complex subtasks — 6 or more tool invocations or advanced reasoning."
+
+  difficulty_to_tier:
+    easy: "small"
+    medium: "medium"
+    hard: "large"
+
+  routing_safety:
+    enabled: true
+    from_tier: "small"
+    to_tier: "medium"
+    min_complexity_keywords: 3
+    max_description_length: 160
+    complexity_keywords:
+      - calculate
+      - compute
+      - find
+      - compare
+      - convert
+      - determine
+      - identify
+      - analyse
+      - analyze
+      - average
+      - sum
+      - total
+      - growth
+      - rate
+      - difference
+
+  decomposition:
+    min_subtasks: 1
+    max_subtasks: 4

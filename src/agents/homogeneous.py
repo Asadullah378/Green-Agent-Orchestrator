@@ -1,8 +1,8 @@
 """
 Green Agent Orchestrator (GAO) — Flow 1: Homogeneous baseline
 
-A standard ReAct agent that uses the same model (gpt-oss:20b) for every
-step: planning, tool calling, and synthesis.
+A standard ReAct agent that uses a single model (specified in the active
+config) for every step: planning, tool calling, and synthesis.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import textwrap
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt import create_react_agent
 
-from src.config import HOMOGENEOUS_MODEL, MAX_AGENT_STEPS
+from src.config import get_config
 from src.models import get_model
 from src.tools import ALL_TOOLS
 from src.tracking import TaskRecord, TrackingResult, track_energy
@@ -54,9 +54,9 @@ SYSTEM_PROMPT = (
 
 
 def _build_agent():
-    model = get_model(HOMOGENEOUS_MODEL)
+    model_name = get_config().homogeneous.model
     return create_react_agent(
-        model,
+        get_model(model_name),
         tools=ALL_TOOLS,
         prompt=SYSTEM_PROMPT,
     )
@@ -74,23 +74,24 @@ def run_task(task_id: str, query: str, run_idx: int = 0, *, verbose: bool = Fals
 
     Returns a fully populated TaskRecord including energy measurements.
     """
+    cfg = get_config().homogeneous
     agent = _build_agent()
     record = TaskRecord(
         task_id=task_id,
         flow="homogeneous",
         run_idx=run_idx,
         query=query,
-        models_used=[HOMOGENEOUS_MODEL],
+        models_used=[cfg.model],
     )
 
     if verbose:
-        print(f"\n{_INDENT}{_DIM}── homogeneous agent ({HOMOGENEOUS_MODEL}) ──{_RESET}")
+        print(f"\n{_INDENT}{_DIM}── homogeneous agent ({cfg.model}) ──{_RESET}")
 
     with track_energy(f"homo_{task_id}_r{run_idx}") as tracking:
         try:
             result = agent.invoke(
                 {"messages": [HumanMessage(content=query)]},
-                config={"recursion_limit": MAX_AGENT_STEPS},
+                config={"recursion_limit": cfg.max_agent_steps},
             )
             messages = result.get("messages", [])
             record.response = messages[-1].content if messages else ""

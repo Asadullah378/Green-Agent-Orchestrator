@@ -30,7 +30,7 @@ from scipy import stats as sp_stats
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.config import RESULTS_DIR
+from src.config import RESULTS_DIR, get_config
 
 # ── Style ────────────────────────────────────────────────────────────────────
 
@@ -61,12 +61,77 @@ plt.rcParams.update({
 # Colorblind-friendly palette (orange vs blue)
 FLOW_COLORS = {"homogeneous": "#D35400", "heterogeneous": "#2471A3"}
 FLOW_HATCHES = {"homogeneous": "", "heterogeneous": ""}
-FLOW_LABELS = {"homogeneous": "Homogeneous (27B)", "heterogeneous": "Heterogeneous (GAO)"}
+FLOW_LABELS = {"homogeneous": "Homogeneous", "heterogeneous": "Heterogeneous (GAO)"}
 DIFF_ORDER = ["easy", "medium", "hard"]
 DIFF_COLORS = {"easy": "#27AE60", "medium": "#F39C12", "hard": "#C0392B"}
 
+# Palette assigned to models in ascending size order. Auto-extended if needed.
+_MODEL_PALETTE = [
+    "#2ECC71", "#3498DB", "#F39C12", "#E74C3C",
+    "#9B59B6", "#1ABC9C", "#34495E", "#E67E22",
+]
+_MODEL_SIZES: dict[str, int] = {}  # populated from results metadata at load time
+_RESULT_METADATA: dict = {}
+
 _FIG_DIR = ""
 _TAB_DIR = ""
+
+
+def _model_color(model_name: str) -> str:
+    """Return a deterministic color for *model_name* (sorted by size)."""
+    if not _MODEL_SIZES:
+        return _MODEL_PALETTE[hash(model_name) % len(_MODEL_PALETTE)]
+    ordered = sorted(_MODEL_SIZES.items(), key=lambda kv: (kv[1], kv[0]))
+    for i, (name, _) in enumerate(ordered):
+        if name == model_name:
+            return _MODEL_PALETTE[i % len(_MODEL_PALETTE)]
+    return _MODEL_PALETTE[hash(model_name) % len(_MODEL_PALETTE)]
+
+
+def _refresh_flow_labels_from_metadata(meta: dict) -> None:
+    """Update FLOW_LABELS so the homogeneous label includes the model size."""
+    homo_size = None
+    cfg_blob = meta.get("config") or {}
+    if isinstance(cfg_blob, dict):
+        homo = cfg_blob.get("homogeneous") or {}
+        if isinstance(homo, dict) and homo.get("size_b"):
+            homo_size = homo["size_b"]
+    if homo_size is None and meta.get("homogeneous_model"):
+        homo_size = _MODEL_SIZES.get(meta["homogeneous_model"])
+    if homo_size:
+        FLOW_LABELS["homogeneous"] = f"Homogeneous ({homo_size}B)"
+
+
+def _extract_model_sizes(meta: dict) -> dict[str, int]:
+    """Build a {model_name: size_b} mapping from result metadata.
+
+    Falls back to the active config (so figures still render when running
+    on legacy results that lack a `config` block).
+    """
+    sizes: dict[str, int] = {}
+    cfg_blob = meta.get("config") if isinstance(meta, dict) else None
+    if isinstance(cfg_blob, dict):
+        for key in ("homogeneous",):
+            sec = cfg_blob.get(key)
+            if isinstance(sec, dict) and sec.get("model"):
+                sizes[sec["model"]] = int(sec.get("size_b", 0) or 0)
+        hetero = cfg_blob.get("heterogeneous") or {}
+        if isinstance(hetero, dict):
+            for role in ("orchestrator", "synthesizer"):
+                sec = hetero.get(role)
+                if isinstance(sec, dict) and sec.get("model"):
+                    sizes.setdefault(sec["model"], int(sec.get("size_b", 0) or 0))
+            for w in hetero.get("workers", []) or []:
+                if isinstance(w, dict) and w.get("model"):
+                    sizes.setdefault(w["model"], int(w.get("size_b", 0) or 0))
+    if not sizes:
+        try:
+            cfg = get_config()
+            for name in cfg.all_model_names():
+                sizes[name] = cfg.size_for_model(name)
+        except Exception:
+            pass
+    return sizes
 
 
 def _savefig(fig: plt.Figure, name: str):
@@ -103,15 +168,22 @@ def _add_bar_labels(ax, bars, fmt="%.4f", fontsize=6.5):
 
 
 def load_results(path: str) -> pd.DataFrame:
+    global _RESULT_METADATA, _MODEL_SIZES
     with open(path) as f:
         data = json.load(f)
 
+    metadata: dict = {}
     if isinstance(data, dict) and "results" in data:
         records = data["results"]
+        metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
     elif isinstance(data, list):
         records = data
     else:
         raise ValueError(f"Unrecognized format in {path}")
+
+    _RESULT_METADATA = metadata or {}
+    _MODEL_SIZES = _extract_model_sizes(_RESULT_METADATA)
+    _refresh_flow_labels_from_metadata(_RESULT_METADATA)
 
     df = pd.DataFrame(records)
     df["difficulty"] = df["task_id"].apply(
@@ -769,17 +841,10 @@ def fig_model_usage_donut(df: pd.DataFrame):
         return
 
     counts = Counter(all_models)
-    model_colors = {
-        "qwen3.5:2b": "#2ECC71",
-        "qwen3.5:4b": "#3498DB",
-        "qwen3.5:9b": "#F39C12",
-        "qwen3.5:27b-q4_K_M": "#E74C3C",
-    }
-
     sorted_models = sorted(counts.keys(), key=lambda m: counts[m], reverse=True)
     labels = [f"{m}\n({counts[m]})" for m in sorted_models]
     sizes = [counts[m] for m in sorted_models]
-    colors = [model_colors.get(m, "#95A5A6") for m in sorted_models]
+    colors = [_model_color(m) for m in sorted_models]
 
     fig, ax = plt.subplots(figsize=(4.0, 3.5))
     wedges, texts, autotexts = ax.pie(
@@ -1067,10 +1132,19 @@ def save_csv_exports(df: pd.DataFrame, out_dir: str):
 
 
 def run_analysis(results_path: str, out_dir: str | None = None):
-    """Run the full analysis pipeline. Called by run_experiment or standalone."""
+    """Run the full analysis pipeline. Called by run_experiment or standalone.
+
+    `out_dir` defaults to the directory containing *results_path*, so figures
+    and tables land next to the JSON they came from. This keeps per-experiment
+    outputs isolated when experiments use distinct `results_dir` settings
+    (e.g. `results/01_qwen3.5_default/`, `results/02_qwen3.5_homo_9b/`, ...).
+    """
     global _FIG_DIR, _TAB_DIR
 
-    base = out_dir or RESULTS_DIR
+    if out_dir is None:
+        base = os.path.dirname(os.path.abspath(results_path)) or RESULTS_DIR
+    else:
+        base = out_dir
     _FIG_DIR = os.path.join(base, "figures")
     _TAB_DIR = os.path.join(base, "tables")
     os.makedirs(_FIG_DIR, exist_ok=True)
@@ -1137,7 +1211,7 @@ def main():
     parser.add_argument("results_file", help="Path to results JSON file")
     parser.add_argument(
         "--out-dir", default=None,
-        help=f"Base output directory (default: {RESULTS_DIR})",
+        help="Base output directory (default: same directory as the results file)",
     )
     args = parser.parse_args()
 

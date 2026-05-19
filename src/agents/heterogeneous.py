@@ -1,13 +1,16 @@
 """
 Green Agent Orchestrator (GAO) — Flow 2: Heterogeneous routed agent
 
-The orchestrator (qwen3.5:4b) decomposes the user query into a small number
-of self-contained subtasks, assigns each to the smallest capable model from
-{qwen3.5:2b, qwen3.5:4b, qwen3.5:9b}, executes them as ReAct sub-agents
-(with prior subtask results injected as context), then synthesises the
-final answer with a small model.
+The orchestrator decomposes the user query into a small number of
+self-contained subtasks and assigns each to the smallest capable worker
+model from the configured pool. Each subtask then runs as a ReAct sub-agent
+(with prior subtask results injected as context). A final synthesiser
+combines the subtask outputs into a single answer.
 
-LangGraph StateGraph gives full control over execution flow.
+Nothing in this module is hardcoded to a specific model family: the
+orchestrator prompt, the worker pool, the difficulty→tier mapping, the
+post-plan safety heuristic, and the per-tier step limits are all read from
+the active `RunConfig` (see `src/config.py`).
 """
 
 from __future__ import annotations
@@ -21,24 +24,14 @@ from typing import Annotated
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 from typing_extensions import TypedDict
 
-from src.config import (
-    DIFFICULTY_MODEL_MAP,
-    HETEROGENEOUS_POOL,
-    MODEL_POOL,
-    ORCHESTRATOR_MODEL,
-)
-
-SUBTASK_MAX_STEPS: dict[str, int] = {
-    "easy": 10,
-    "medium": 15,
-    "hard": 25,
-}
+from src.config import RunConfig, get_config
 from src.models import get_model, model_size_b
 from src.tools import ALL_TOOLS
 from src.tracking import TaskRecord, TrackingResult, track_energy
+
 
 # ── Verbose logging helpers ──────────────────────────────────────────────────
 
@@ -61,9 +54,12 @@ def _log(text: str) -> None:
         print(f"{_INDENT}{text}")
 
 
+_THINKING_RE = re.compile(r"<think>[\s\S]*?</think>")
+
+
 def _strip_thinking(text: str) -> str:
-    """Remove <think>…</think> blocks that Qwen3.5 may emit."""
-    return re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+    """Remove <think>…</think> blocks emitted by some reasoning models."""
+    return _THINKING_RE.sub("", text).strip()
 
 
 # ── Pydantic schema for the orchestrator's structured plan ───────────────────
@@ -85,10 +81,8 @@ class Subtask(BaseModel):
     difficulty: str = Field(description="One of: easy, medium, hard")
     assigned_model: str = Field(
         description=(
-            "Pick the smallest sufficient model from the pool: "
-            "qwen3.5:2b (single tool call), "
-            "qwen3.5:4b (2-3 tool calls or light reasoning), "
-            "qwen3.5:9b (complex multi-tool reasoning)."
+            "Name of the worker model to run this subtask. "
+            "Choose the smallest capable model from the configured pool."
         )
     )
 
@@ -98,8 +92,8 @@ class TaskPlan(BaseModel):
         description="1-4 self-contained subtasks. Use 1 subtask when the task is simple. Fewer is always better."
     )
     synthesis_model: str = Field(
-        default="qwen3.5:2b",
-        description="Model for the final synthesis step. Use qwen3.5:2b.",
+        default="",
+        description="Model for the final synthesis step.",
     )
 
 
@@ -118,22 +112,33 @@ class GAOState(TypedDict):
     subtask_details: Annotated[list[dict], operator.add]
 
 
-# ── Prompts ──────────────────────────────────────────────────────────────────
+# ── Prompts (built dynamically from config) ──────────────────────────────────
 
-ORCHESTRATOR_PROMPT = """\
-You are a task decomposition engine. Break the user query into 1-4 subtasks.
 
-Rules:
-- Use as FEW subtasks as possible. 1 subtask is ideal for simple tasks.
-- Each subtask description must be SELF-CONTAINED with ALL data/numbers needed.
-- Combine data-fetch + computation into ONE subtask when they need the same data.
-- Tools: calculator, unit_converter, data_lookup, date_calculator, text_processor.
-- Models (pick by number of TOTAL tool invocations the subtask will need):
-  qwen3.5:2b = simple, 1-2 total tool invocations
-  qwen3.5:4b = moderate, 3-5 total tool invocations or multi-step math
-  qwen3.5:9b = complex, 6+ total tool invocations or advanced reasoning
-  Example: a subtask needing 6 calculator calls → qwen3.5:9b, not 2b.
-- Set synthesis_model to "qwen3.5:2b"."""
+def _build_orchestrator_prompt(cfg: RunConfig) -> str:
+    """Build a model-family-agnostic orchestrator prompt from the worker pool."""
+    hetero = cfg.heterogeneous
+    lines = [
+        "You are a task decomposition engine. "
+        f"Break the user query into {hetero.decomposition.min_subtasks}-"
+        f"{hetero.decomposition.max_subtasks} subtasks.",
+        "",
+        "Rules:",
+        "- Use as FEW subtasks as possible. 1 subtask is ideal for simple tasks.",
+        "- Each subtask description must be SELF-CONTAINED with ALL data/numbers needed.",
+        "- Combine data-fetch + computation into ONE subtask when they need the same data.",
+        "- Tools: calculator, unit_converter, data_lookup, date_calculator, text_processor.",
+        "- Choose `assigned_model` for each subtask by matching expected complexity to one"
+        " of the configured worker models:",
+    ]
+    for w in hetero.workers:
+        desc = w.description or f"{w.tier} tier ({w.size_b}B params)"
+        lines.append(f"    {w.model} = {desc}")
+    lines.append(
+        f'- Set `synthesis_model` to "{hetero.synthesizer.model}".'
+    )
+    return "\n".join(lines)
+
 
 WORKER_SYSTEM = (
     "You are a focused worker agent. Complete the subtask described below "
@@ -155,11 +160,11 @@ SYNTHESIS_SYSTEM = (
 )
 
 
-# ── Graph node functions ─────────────────────────────────────────────────────
+# ── Plan parsing & validation ────────────────────────────────────────────────
 
 
 def _extract_plan_from_text(raw: str) -> TaskPlan | None:
-    """Try to parse a TaskPlan from raw model text that failed structured parsing."""
+    """Best-effort recovery of a TaskPlan from a free-text model response."""
     text = raw.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
@@ -185,12 +190,57 @@ def _extract_plan_from_text(raw: str) -> TaskPlan | None:
 _STRUCTURED_METHODS = ["function_calling", "json_schema"]
 
 
+def _validate_plan(plan: TaskPlan, cfg: RunConfig) -> TaskPlan:
+    """Apply config-driven safety checks: valid model names, routing safety."""
+    hetero = cfg.heterogeneous
+    worker_models = {w.model for w in hetero.workers}
+    safety = hetero.routing_safety
+    keywords = {k.lower() for k in safety.complexity_keywords}
+
+    for st in plan.subtasks:
+        if st.assigned_model not in worker_models:
+            fallback_tier = hetero.difficulty_to_tier.get(
+                st.difficulty, hetero.workers[len(hetero.workers) // 2].tier
+            )
+            st.assigned_model = hetero.model_for_tier(fallback_tier)
+
+        if safety.enabled:
+            from_model = hetero.model_for_tier(safety.from_tier)
+            to_model = hetero.model_for_tier(safety.to_tier)
+            if st.assigned_model == from_model:
+                desc_lower = st.description.lower()
+                hits = sum(1 for k in keywords if k in desc_lower)
+                if (
+                    hits >= safety.min_complexity_keywords
+                    or len(st.description) > safety.max_description_length
+                ):
+                    old = st.assigned_model
+                    st.assigned_model = to_model
+                    st.difficulty = "medium"
+                    _log(
+                        f"{_YELLOW}[AUTO-UPGRADE]{_RESET} #{st.id}: "
+                        f"{old}→{st.assigned_model} ({hits} complexity keywords)"
+                    )
+
+    if plan.synthesis_model not in worker_models | {hetero.synthesizer.model}:
+        plan.synthesis_model = hetero.synthesizer.model
+
+    return plan
+
+
+# ── Graph node functions ─────────────────────────────────────────────────────
+
+
 def orchestrate(state: GAOState) -> dict:
     """Decompose the user query into a structured plan."""
-    _log(f"\n{_DIM}── orchestrator ({ORCHESTRATOR_MODEL}) decomposing query ──{_RESET}")
-    model = get_model(ORCHESTRATOR_MODEL)
+    cfg = get_config()
+    hetero = cfg.heterogeneous
+    orch_model_name = hetero.orchestrator.model
+
+    _log(f"\n{_DIM}── orchestrator ({orch_model_name}) decomposing query ──{_RESET}")
+    model = get_model(orch_model_name)
     messages = [
-        SystemMessage(content=ORCHESTRATOR_PROMPT),
+        SystemMessage(content=_build_orchestrator_prompt(cfg)),
         HumanMessage(content=state["user_query"]),
     ]
 
@@ -207,12 +257,22 @@ def orchestrate(state: GAOState) -> dict:
                 break
             raw_text = ""
             if result.get("raw"):
-                raw_text = result["raw"].content if hasattr(result["raw"], "content") else str(result["raw"])
+                raw_text = (
+                    result["raw"].content
+                    if hasattr(result["raw"], "content")
+                    else str(result["raw"])
+                )
                 plan = _extract_plan_from_text(raw_text)
                 if plan:
-                    _log(f"{_GREEN}[RECOVERED]{_RESET} Extracted plan from raw output (method={method})")
+                    _log(
+                        f"{_GREEN}[RECOVERED]{_RESET} Extracted plan "
+                        f"from raw output (method={method})"
+                    )
                     break
-            _log(f"{_YELLOW}[PARSE FAIL]{_RESET} method={method}, raw={raw_text[:200]!r}")
+            _log(
+                f"{_YELLOW}[PARSE FAIL]{_RESET} method={method}, "
+                f"raw={raw_text[:200]!r}"
+            )
         except Exception as exc:
             _log(f"{_YELLOW}[METHOD FAIL]{_RESET} method={method}: {exc}")
             continue
@@ -225,55 +285,49 @@ def orchestrate(state: GAOState) -> dict:
                 description=state["user_query"],
                 tools_needed=[t.name for t in ALL_TOOLS],
                 difficulty="hard",
-                assigned_model=DIFFICULTY_MODEL_MAP.get("hard", "qwen3.5:4b"),
+                assigned_model=hetero.model_for_difficulty("hard"),
             )],
-            synthesis_model="qwen3.5:2b",
+            synthesis_model=hetero.synthesizer.model,
         )
 
-    _COMPLEXITY_VERBS = {
-        "calculate", "compute", "find", "compare", "convert",
-        "determine", "identify", "analyse", "analyze", "average",
-        "sum", "total", "growth", "rate", "difference",
-    }
-    for st in plan.subtasks:
-        if st.assigned_model not in HETEROGENEOUS_POOL:
-            st.assigned_model = DIFFICULTY_MODEL_MAP.get(st.difficulty, "qwen3.5:4b")
-        if st.assigned_model == "qwen3.5:2b":
-            desc_lower = st.description.lower()
-            verb_hits = sum(1 for v in _COMPLEXITY_VERBS if v in desc_lower)
-            if verb_hits >= 3 or len(st.description) > 160:
-                old = st.assigned_model
-                st.assigned_model = "qwen3.5:4b"
-                st.difficulty = "medium"
-                _log(
-                    f"{_YELLOW}[AUTO-UPGRADE]{_RESET} #{st.id}: "
-                    f"{old}→{st.assigned_model} ({verb_hits} complexity keywords)"
-                )
-
-    if plan.synthesis_model not in HETEROGENEOUS_POOL:
-        plan.synthesis_model = "qwen3.5:2b"
+    plan = _validate_plan(plan, cfg)
 
     if _verbose:
-        _log(f"{_MAGENTA}[PLAN]{_RESET} {len(plan.subtasks)} subtask(s), synthesis model: {plan.synthesis_model}")
+        _log(
+            f"{_MAGENTA}[PLAN]{_RESET} {len(plan.subtasks)} subtask(s), "
+            f"synthesis model: {plan.synthesis_model}"
+        )
         for st in plan.subtasks:
             tools_str = ", ".join(st.tools_needed) if st.tools_needed else "none"
             _log(
                 f"  {_BOLD}#{st.id}{_RESET} [{st.difficulty}] "
-                f"{_CYAN}{st.assigned_model}{_RESET} — {st.description[:120]}  "
-                f"{_DIM}tools: {tools_str}{_RESET}"
+                f"{_CYAN}{st.assigned_model}{_RESET} — "
+                f"{st.description[:120]}  {_DIM}tools: {tools_str}{_RESET}"
             )
 
     return {
         "plan": plan.model_dump(),
         "current_idx": 0,
-        "models_used": [ORCHESTRATOR_MODEL],
+        "models_used": [orch_model_name],
         "total_llm_calls": 1,
         "total_tool_calls": 0,
     }
 
 
+def _step_limit_for_subtask(subtask: dict, cfg: RunConfig) -> int:
+    """Resolve the per-subtask recursion limit from the assigned model's tier."""
+    model_name = subtask["assigned_model"]
+    tier = cfg.heterogeneous.tier_for_model(model_name)
+    if tier is not None:
+        return cfg.heterogeneous.tier(tier).max_steps
+    # Fallback: use the middle tier's step limit.
+    workers = cfg.heterogeneous.workers
+    return workers[len(workers) // 2].max_steps
+
+
 def execute_subtask(state: GAOState) -> dict:
     """Execute the current subtask with its assigned model + prior context."""
+    cfg = get_config()
     plan = state["plan"]
     idx = state["current_idx"]
     subtask = plan["subtasks"][idx]
@@ -288,7 +342,6 @@ def execute_subtask(state: GAOState) -> dict:
     tool_name_set = set(subtask.get("tools_needed", []))
     tools_for_subtask = [t for t in ALL_TOOLS if t.name in tool_name_set] or ALL_TOOLS
 
-    # Build prompt with prior subtask results as context
     prior_results = state.get("subtask_results", [])
     if prior_results:
         context = "\n".join(
@@ -300,11 +353,7 @@ def execute_subtask(state: GAOState) -> dict:
     else:
         system_prompt = WORKER_SYSTEM.format(description=description)
 
-    agent = create_react_agent(
-        model,
-        tools=tools_for_subtask,
-        prompt=system_prompt,
-    )
+    agent = create_react_agent(model, tools=tools_for_subtask, prompt=system_prompt)
 
     subtask_detail = {
         "subtask_id": subtask["id"],
@@ -314,7 +363,7 @@ def execute_subtask(state: GAOState) -> dict:
         "difficulty": subtask["difficulty"],
     }
 
-    step_limit = SUBTASK_MAX_STEPS.get(subtask["difficulty"], 15)
+    step_limit = _step_limit_for_subtask(subtask, cfg)
     _log(f"{_DIM}(step limit: {step_limit}){_RESET}")
 
     try:
@@ -344,7 +393,10 @@ def execute_subtask(state: GAOState) -> dict:
     except Exception as exc:
         exc_str = str(exc)
         if "recursion" in exc_str.lower() or "limit" in exc_str.lower():
-            _log(f"{_RED}[STEP LIMIT]{_RESET} Worker hit step limit ({step_limit}) — returning partial result")
+            _log(
+                f"{_RED}[STEP LIMIT]{_RESET} Worker hit step limit "
+                f"({step_limit}) — returning partial result"
+            )
             response = f"Worker exceeded step limit ({step_limit} steps). Partial or no result."
         else:
             response = f"ERROR: {exc}"
@@ -368,8 +420,9 @@ def execute_subtask(state: GAOState) -> dict:
 
 def synthesise(state: GAOState) -> dict:
     """Combine subtask results into a final answer."""
+    cfg = get_config()
     plan = state["plan"]
-    model_name = plan.get("synthesis_model", "qwen3.5:2b")
+    model_name = plan.get("synthesis_model") or cfg.heterogeneous.synthesizer.model
     model = get_model(model_name)
 
     _log(f"\n{_DIM}── synthesis ({model_name}) ──{_RESET}")
@@ -411,12 +464,9 @@ def synthesise(state: GAOState) -> dict:
 
 
 def should_continue(state: GAOState) -> str:
-    """Route: more subtasks → execute_subtask, else → synthesise or end."""
     plan = state["plan"]
     if state["current_idx"] < len(plan["subtasks"]):
         return "execute_subtask"
-    # Skip synthesis entirely when there's only 1 subtask — worker response
-    # is already the final answer. This eliminates one full LLM call.
     if len(plan["subtasks"]) == 1:
         return "skip_synthesis"
     return "synthesise"

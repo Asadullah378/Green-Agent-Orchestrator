@@ -1,0 +1,102 @@
+# ============================================================================
+# Experiment 05 — Mistral 2026 lineup
+# ============================================================================
+# Cross-architecture replication using the 2026 Mistral family:
+#   - Mistral Large 3 (41B active / 675B total) as the homogeneous baseline
+#   - Ministral 3 / 8 / 14 (edge models) as the heterogeneous worker pool
+#
+# Pull the models before running:
+#   ollama pull mistral-large:latest
+#   ollama pull ministral:3b
+#   ollama pull ministral:8b
+#   ollama pull ministral:14b
+#
+# Run:
+#   python -m src.run_experiment --config configs/experiments/05_mistral.yaml
+# ============================================================================
+
+experiment:
+  name: "05_mistral"
+  num_runs: 7
+  results_dir: "results/05_mistral"
+
+llm:
+  provider: "ollama"
+  request_timeout: 300
+  temperature: 0.0
+  reasoning: false
+
+  ollama:
+    base_url: "http://localhost:11434"
+
+  llamacpp:
+    base_url: "http://localhost:8080/v1"
+    api_key: "no-key"
+
+energy:
+  country_iso_code: "FIN"
+  log_level: "error"
+  tracking_mode: "process"
+
+homogeneous:
+  model: "mistral-large:latest"     # Mistral Large 3
+  size_b: 41                         # active parameters (675B total)
+  max_agent_steps: 40
+
+heterogeneous:
+  orchestrator:
+    model: "ministral:8b"
+    size_b: 8
+
+  synthesizer:
+    model: "ministral:3b"
+    size_b: 3
+
+  workers:
+    - tier: "small"
+      model: "ministral:3b"
+      size_b: 3
+      max_steps: 10
+      description: "Simple subtasks — 1 to 2 total tool invocations."
+    - tier: "medium"
+      model: "ministral:8b"
+      size_b: 8
+      max_steps: 15
+      description: "Moderate subtasks — 3 to 5 tool invocations or multi-step math."
+    - tier: "large"
+      model: "ministral:14b"
+      size_b: 14
+      max_steps: 25
+      description: "Complex subtasks — 6 or more tool invocations or advanced reasoning."
+
+  difficulty_to_tier:
+    easy: "small"
+    medium: "medium"
+    hard: "large"
+
+  routing_safety:
+    enabled: true
+    from_tier: "small"
+    to_tier: "medium"
+    min_complexity_keywords: 3
+    max_description_length: 160
+    complexity_keywords:
+      - calculate
+      - compute
+      - find
+      - compare
+      - convert
+      - determine
+      - identify
+      - analyse
+      - analyze
+      - average
+      - sum
+      - total
+      - growth
+      - rate
+      - difference
+
+  decomposition:
+    min_subtasks: 1
+    max_subtasks: 4

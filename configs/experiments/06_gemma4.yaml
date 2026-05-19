@@ -1,0 +1,101 @@
+# ============================================================================
+# Experiment 06 — Gemma 4 family
+# ============================================================================
+# Cross-architecture replication using Google's Gemma 4 family (released
+# April 2026, Apache 2.0, native tool calling, 128K–256K context).
+#
+# Pull the models before running:
+#   ollama pull gemma4:e2b    # 2.1B effective, text-only
+#   ollama pull gemma4:e4b    # 4.4B effective, multimodal
+#   ollama pull gemma4:26b    # 26.1B MoE (3.8B active), multimodal
+#   ollama pull gemma4:31b    # 31B dense, multimodal, 256K context
+#
+# Run:
+#   python -m src.run_experiment --config configs/experiments/06_gemma4.yaml
+# ============================================================================
+
+experiment:
+  name: "06_gemma4"
+  num_runs: 7
+  results_dir: "results/06_gemma4"
+
+llm:
+  provider: "ollama"
+  request_timeout: 300
+  temperature: 0.0
+  reasoning: false
+
+  ollama:
+    base_url: "http://localhost:11434"
+
+  llamacpp:
+    base_url: "http://localhost:8080/v1"
+    api_key: "no-key"
+
+energy:
+  country_iso_code: "FIN"
+  log_level: "error"
+  tracking_mode: "process"
+
+homogeneous:
+  model: "gemma4:31b"               # 31B dense — strongest single-model baseline
+  size_b: 31
+  max_agent_steps: 40
+
+heterogeneous:
+  orchestrator:
+    model: "gemma4:e4b"
+    size_b: 4
+
+  synthesizer:
+    model: "gemma4:e2b"
+    size_b: 2
+
+  workers:
+    - tier: "small"
+      model: "gemma4:e2b"
+      size_b: 2
+      max_steps: 10
+      description: "Simple subtasks — 1 to 2 total tool invocations."
+    - tier: "medium"
+      model: "gemma4:e4b"
+      size_b: 4
+      max_steps: 15
+      description: "Moderate subtasks — 3 to 5 tool invocations or multi-step math."
+    - tier: "large"
+      model: "gemma4:26b"
+      size_b: 26
+      max_steps: 25
+      description: "Complex subtasks — 6 or more tool invocations or advanced reasoning."
+
+  difficulty_to_tier:
+    easy: "small"
+    medium: "medium"
+    hard: "large"
+
+  routing_safety:
+    enabled: true
+    from_tier: "small"
+    to_tier: "medium"
+    min_complexity_keywords: 3
+    max_description_length: 160
+    complexity_keywords:
+      - calculate
+      - compute
+      - find
+      - compare
+      - convert
+      - determine
+      - identify
+      - analyse
+      - analyze
+      - average
+      - sum
+      - total
+      - growth
+      - rate
+      - difference
+
+  decomposition:
+    min_subtasks: 1
+    max_subtasks: 4

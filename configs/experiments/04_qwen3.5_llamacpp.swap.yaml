@@ -1,0 +1,66 @@
+# ============================================================================
+# llama-swap proxy configuration for experiment 04 (Qwen 3.5 via llama.cpp)
+# ============================================================================
+# This file is NOT loaded by the experiment runner. It is the configuration
+# for the `llama-swap` proxy that sits in front of `llama-server` and
+# exposes the four Qwen 3.5 GGUF checkpoints as a single OpenAI-compatible
+# endpoint.
+#
+# Start the proxy with:
+#   llama-swap --config configs/experiments/04_qwen3.5_llamacpp.swap.yaml --listen :8080
+#
+# Adjust the absolute paths in the `cmd` lines to point at your local GGUF
+# files, and tune `--n-gpu-layers` to match your hardware (use 0 for CPU).
+# ============================================================================
+
+healthCheckTimeout: 180
+logRequests: false
+
+# How long an unused model is kept loaded before unloading (seconds).
+# Lower this if you are tight on memory.
+defaultTtlSeconds: 600
+
+models:
+  qwen3.5-2b:
+    proxy: http://127.0.0.1:${PORT}
+    cmd: >
+      llama-server
+        --port ${PORT}
+        --model /Users/asadullah/models/qwen3.5/qwen3.5-2b-instruct-q4_k_m.gguf
+        --ctx-size 8192
+        --n-gpu-layers 99
+        --jinja
+        --metrics
+
+  qwen3.5-4b:
+    proxy: http://127.0.0.1:${PORT}
+    cmd: >
+      llama-server
+        --port ${PORT}
+        --model /Users/asadullah/models/qwen3.5/qwen3.5-4b-instruct-q4_k_m.gguf
+        --ctx-size 16384
+        --n-gpu-layers 99
+        --jinja
+        --metrics
+
+  qwen3.5-9b:
+    proxy: http://127.0.0.1:${PORT}
+    cmd: >
+      llama-server
+        --port ${PORT}
+        --model /Users/asadullah/models/qwen3.5/qwen3.5-9b-instruct-q4_k_m.gguf
+        --ctx-size 16384
+        --n-gpu-layers 99
+        --jinja
+        --metrics
+
+  qwen3.5-27b:
+    proxy: http://127.0.0.1:${PORT}
+    cmd: >
+      llama-server
+        --port ${PORT}
+        --model /Users/asadullah/models/qwen3.5/qwen3.5-27b-instruct-q4_k_m.gguf
+        --ctx-size 16384
+        --n-gpu-layers 99
+        --jinja
+        --metrics

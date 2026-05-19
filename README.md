@@ -43,6 +43,10 @@ Make sure Ollama is running before starting experiments:
 ollama serve
 ```
 
+The experiment runner can also use `llama.cpp` as the inference backend
+instead of Ollama. See the **Configuration → llama.cpp backend** section
+below for the one-time setup.
+
 ## Installation
 
 ```bash
@@ -60,6 +64,21 @@ pip install -r requirements.txt
 Runs both flows across all 15 tasks with 3 repetitions (90 total runs). The execution alternates between homogeneous and heterogeneous flows per task to control for thermal and caching effects.
 
 ```bash
+python -m src.run_experiment
+```
+
+This loads `configs/default.yaml` (the Qwen3.5 paper baseline). To run with a different model family, pass `--config`:
+
+```bash
+python -m src.run_experiment --config configs/llama3.yaml
+python -m src.run_experiment --config configs/mistral.yaml
+python -m src.run_experiment --config configs/my_custom.yaml
+```
+
+You can also set `GAO_CONFIG` in the environment to make every command use a non-default config:
+
+```bash
+export GAO_CONFIG=configs/llama3.yaml
 python -m src.run_experiment
 ```
 
@@ -109,13 +128,22 @@ python -m src.merge_results results/results_A.json results/results_B.json --anal
 ## Project Structure
 
 ```
+├── configs/
+│   └── experiments/              # six paper experiments (see README "Configuration")
+│       ├── 01_qwen3.5_default.yaml
+│       ├── 02_qwen3.5_homo_9b.yaml
+│       ├── 03_qwen3.5_homo_4b.yaml
+│       ├── 04_qwen3.5_llamacpp.yaml
+│       ├── 04_qwen3.5_llamacpp.swap.yaml   # llama-swap proxy config for exp 04
+│       ├── 05_mistral.yaml
+│       └── 06_gemma4.yaml
 ├── src/
-│   ├── config.py                 # Model pool, Ollama settings, experiment parameters
+│   ├── config.py                 # YAML config loader (RunConfig + legacy constants)
 │   ├── models.py                 # ChatOllama model factory (cached instances)
 │   ├── tools.py                  # 5 deterministic agent tools (no external APIs)
 │   ├── tracking.py               # CodeCarbon energy tracking + timing wrapper
-│   ├── run_experiment.py         # Main experiment runner
-│   ├── analyze_results.py        # Figure and table generation
+│   ├── run_experiment.py         # Main experiment runner (accepts --config PATH)
+│   ├── analyze_results.py        # Figure and table generation (model-family-agnostic)
 │   ├── merge_results.py          # Utility to combine multiple result files
 │   ├── agents/
 │   │   ├── homogeneous.py        # Flow 1 — single-model ReAct agent
@@ -166,13 +194,146 @@ All tools are deterministic with hardcoded data to ensure reproducible experimen
 
 ## Configuration
 
-Edit `src/config.py` to customise:
+The entire experiment is driven by a single YAML config file in `configs/`.
+Nothing in the code is tied to a specific model family; the orchestrator
+prompt, worker pool, routing heuristic, and step limits are all built at
+runtime from the active config.
 
-- **Model pool** — add or swap models (must be available in Ollama)
-- **Orchestrator and worker assignments** — change `ORCHESTRATOR_MODEL`, `DIFFICULTY_MODEL_MAP`
-- **Repetitions** — `NUM_RUNS` (default: 3)
-- **LLM settings** — `LLM_TEMPERATURE` (default: 0.0), `LLM_REQUEST_TIMEOUT`
-- **CodeCarbon** — `COUNTRY_ISO_CODE` (default: `"FIN"` for Finland)
+All experiment configs live in `configs/experiments/`. Each one writes its
+output to a dedicated subdirectory under `results/` so the six experiments
+never clobber each other and each can be analysed independently.
+
+| # | Config file | Backend | Homogeneous | Heterogeneous workers |
+|---|---|---|---|---|
+| 01 | `configs/experiments/01_qwen3.5_default.yaml` | Ollama    | `qwen3.5:27b-q4_K_M` | Qwen 3.5 (2B / 4B / 9B) |
+| 02 | `configs/experiments/02_qwen3.5_homo_9b.yaml` | Ollama    | `qwen3.5:9b`         | Qwen 3.5 (2B / 4B / 9B) |
+| 03 | `configs/experiments/03_qwen3.5_homo_4b.yaml` | Ollama    | `qwen3.5:4b`         | Qwen 3.5 (2B / 4B / 9B) |
+| 04 | `configs/experiments/04_qwen3.5_llamacpp.yaml` | llama.cpp | `qwen3.5-27b`       | Qwen 3.5 (2B / 4B / 9B) |
+| 05 | `configs/experiments/05_mistral.yaml`         | Ollama    | `mistral-large:latest` (Large 3) | Ministral 3 (3B / 8B / 14B) |
+| 06 | `configs/experiments/06_gemma4.yaml`          | Ollama    | `gemma4:31b`         | Gemma 4 (E2B / E4B / 26B) |
+
+Each experiment runs 7 repetitions per (task, flow) — 15 tasks × 2 flows ×
+7 runs = 210 records per experiment.
+
+Output layout for one experiment:
+
+```
+results/
+└── 01_qwen3.5_default/
+    ├── results_01_qwen3.5_default_<timestamp>.json
+    ├── results_01_qwen3.5_default_<timestamp>.csv
+    ├── figures/         (PNGs at 300 DPI)
+    ├── tables/          (LaTeX \input{} fragments)
+    └── csv/             (per-task / per-difficulty / overall statistics)
+```
+
+To run any experiment:
+
+```bash
+python -m src.run_experiment --config configs/experiments/01_qwen3.5_default.yaml
+python -m src.run_experiment --config configs/experiments/06_gemma4.yaml
+# ...
+```
+
+When run with no `--config` flag, the runner falls back to experiment 01
+(the paper baseline).
+
+### llama.cpp backend (experiment 04)
+
+Experiment 04 runs the same Qwen 3.5 setup as experiment 01, but the
+inference backend is `llama.cpp` (accessed through
+[`llama-swap`](https://github.com/mostlygeek/llama-swap), a small
+OpenAI-compatible proxy that hot-swaps the underlying `.gguf` model on
+demand). This isolates the effect of the runtime/backend from the
+model-size effect.
+
+One-time setup (Apple Silicon / macOS):
+
+```bash
+# 1. Install llama.cpp and llama-swap
+brew install llama.cpp
+brew install llama-swap
+
+# 2. Download Qwen 3.5 GGUF checkpoints to ~/models/qwen3.5/
+#    (paths used in configs/experiments/04_qwen3.5_llamacpp.swap.yaml)
+
+# 3. Start the proxy in one terminal
+llama-swap --config configs/experiments/04_qwen3.5_llamacpp.swap.yaml --listen :8080
+
+# 4. In another terminal, run experiment 04
+python -m src.run_experiment --config configs/experiments/04_qwen3.5_llamacpp.yaml
+```
+
+The proxy auto-loads each model the first time it is requested, keeps it
+warm for a configurable TTL, and unloads it when memory is needed for
+another model. The experiment harness is unaware of any of this; from
+its perspective, every model lives behind one OpenAI-compatible URL.
+
+### Creating a new config
+
+Copy `configs/default.yaml` and edit the sections you need. The most
+common knobs are:
+
+```yaml
+experiment:
+  name: "my_experiment"       # appended to result filenames
+  num_runs: 3                 # repetitions per (task, flow)
+
+llm:
+  provider: "ollama"          # "ollama" | "llamacpp"
+  temperature: 0.0
+  reasoning: false            # disable thinking mode for Qwen-family models
+  ollama:
+    base_url: "http://localhost:11434"
+  llamacpp:
+    base_url: "http://localhost:8080/v1"
+    api_key: "no-key"
+
+energy:
+  country_iso_code: "FIN"     # CodeCarbon ISO-3 country code
+
+homogeneous:
+  model: "qwen3.5:27b-q4_K_M"
+  size_b: 27
+  max_agent_steps: 40
+
+heterogeneous:
+  orchestrator:
+    model: "qwen3.5:4b"
+    size_b: 4
+  synthesizer:
+    model: "qwen3.5:2b"
+    size_b: 2
+  workers:                    # add/remove tiers freely
+    - tier: "small"
+      model: "qwen3.5:2b"
+      size_b: 2
+      max_steps: 10
+      description: "Simple subtasks — 1 to 2 total tool invocations."
+    - tier: "medium"
+      model: "qwen3.5:4b"
+      size_b: 4
+      max_steps: 15
+      description: "Moderate subtasks — 3 to 5 tool invocations or multi-step math."
+    - tier: "large"
+      model: "qwen3.5:9b"
+      size_b: 9
+      max_steps: 25
+      description: "Complex subtasks — 6+ tool invocations or advanced reasoning."
+  difficulty_to_tier:
+    easy:   "small"
+    medium: "medium"
+    hard:   "large"
+  routing_safety:
+    enabled: true              # auto-upgrade misrouted complex subtasks
+    from_tier: "small"
+    to_tier:   "medium"
+```
+
+Every result JSON file embeds a copy of the config it was produced with
+under `metadata.config`, so figures and tables produced by
+`src/analyze_results.py` automatically adapt their labels and color
+palette to the model family used.
 
 ## Citation
 

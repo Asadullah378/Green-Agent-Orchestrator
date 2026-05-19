@@ -1,0 +1,99 @@
+# ============================================================================
+# Experiment 01 — Qwen 3.5 default (paper baseline)
+# ============================================================================
+# Homogeneous baseline: a single 27B model (qwen3.5:27b-q4_K_M).
+# Heterogeneous pool: 2B / 4B / 9B Qwen 3.5 workers, 4B orchestrator, 2B synth.
+#
+# This is the exact configuration used for the headline results in the paper.
+# Results land in results/01_qwen3.5_default/ so this experiment is fully
+# isolated from the other five.
+#
+# Run:
+#   python -m src.run_experiment --config configs/experiments/01_qwen3.5_default.yaml
+# ============================================================================
+
+experiment:
+  name: "01_qwen3.5_default"
+  num_runs: 7
+  results_dir: "results/01_qwen3.5_default"
+
+llm:
+  provider: "ollama"
+  request_timeout: 240
+  temperature: 0.0
+  reasoning: false
+
+  ollama:
+    base_url: "http://localhost:11434"
+
+  llamacpp:
+    base_url: "http://localhost:8080/v1"
+    api_key: "no-key"
+
+energy:
+  country_iso_code: "FIN"
+  log_level: "error"
+  tracking_mode: "process"
+
+homogeneous:
+  model: "qwen3.5:27b-q4_K_M"
+  size_b: 27
+  max_agent_steps: 40
+
+heterogeneous:
+  orchestrator:
+    model: "qwen3.5:4b"
+    size_b: 4
+
+  synthesizer:
+    model: "qwen3.5:2b"
+    size_b: 2
+
+  workers:
+    - tier: "small"
+      model: "qwen3.5:2b"
+      size_b: 2
+      max_steps: 10
+      description: "Simple subtasks — 1 to 2 total tool invocations."
+    - tier: "medium"
+      model: "qwen3.5:4b"
+      size_b: 4
+      max_steps: 15
+      description: "Moderate subtasks — 3 to 5 tool invocations or multi-step math."
+    - tier: "large"
+      model: "qwen3.5:9b"
+      size_b: 9
+      max_steps: 25
+      description: "Complex subtasks — 6 or more tool invocations or advanced reasoning."
+
+  difficulty_to_tier:
+    easy: "small"
+    medium: "medium"
+    hard: "large"
+
+  routing_safety:
+    enabled: true
+    from_tier: "small"
+    to_tier: "medium"
+    min_complexity_keywords: 3
+    max_description_length: 160
+    complexity_keywords:
+      - calculate
+      - compute
+      - find
+      - compare
+      - convert
+      - determine
+      - identify
+      - analyse
+      - analyze
+      - average
+      - sum
+      - total
+      - growth
+      - rate
+      - difference
+
+  decomposition:
+    min_subtasks: 1
+    max_subtasks: 4
