@@ -16,6 +16,15 @@
 #
 # Existing files are skipped, so re-running is cheap.
 #
+# Note on the implementation:
+#   We deliberately avoid the `huggingface-cli` binary. On Mahti, the
+#   Tykky-containerized Python (`module load python-data`) is mounted at
+#   an ephemeral path (e.g. /PUHTI_TYKKY_<id>/miniforge/envs/env1/...),
+#   so a `pip install --user huggingface_hub` bakes that ephemeral path
+#   into the shebang of ~/.local/bin/huggingface-cli, and the binary
+#   stops working as soon as the Tykky session rolls. We instead drive
+#   the `huggingface_hub` library directly via the active interpreter.
+#
 # Note on naming:
 #   For Qwen 3.5 the bare `Qwen/Qwen3.5-NB` is already the post-trained
 #   instruction model — there is no separate `-Instruct` HF repo any
@@ -37,24 +46,37 @@ echo "Quantisation     : ${QUANT}"
 echo
 
 mkdir -p "${GGUF_DIR}"
-cd "${GGUF_DIR}"
 
-# Make sure huggingface-cli is available
-if ! command -v huggingface-cli >/dev/null 2>&1; then
-    echo "huggingface-cli not on PATH — installing huggingface_hub into your user site-packages…"
-    module load python-data 2>/dev/null || true
-    pip install --user --quiet huggingface_hub
-    # `pip install --user` puts binaries under ~/.local/bin which may not
-    # be on PATH on Mahti login nodes.
-    export PATH="${HOME}/.local/bin:${PATH}"
+# Make sure we have a usable Python, and that huggingface_hub is importable.
+module load python-data 2>/dev/null || true
+
+if ! command -v python >/dev/null 2>&1; then
+    echo "ERROR: no 'python' on PATH. Try 'module load python-data' first." >&2
+    exit 1
 fi
 
-# Mapping: local (lowercase) size tag → upstream (PascalCase) size tag
-declare -A SIZES=( [2b]=2B [4b]=4B [9b]=9B [27b]=27B )
+if ! python -c "import huggingface_hub" 2>/dev/null; then
+    echo "huggingface_hub not importable — installing into your user site-packages…"
+    python -m pip install --user --quiet huggingface_hub
+    # Re-check; if still broken we want to fail loudly here, not deep
+    # inside the per-file loop below.
+    python -c "import huggingface_hub" || {
+        echo "ERROR: huggingface_hub still not importable after pip install." >&2
+        exit 1
+    }
+fi
+echo "Using python : $(command -v python)"
+python -c "import huggingface_hub, sys; print(f'huggingface_hub : {huggingface_hub.__version__}')"
+echo
 
 for lower in 2b 4b 9b 27b; do
-    upper="${SIZES[$lower]}"
-    target="qwen3.5-${lower}-instruct-q4_k_m.gguf"
+    case "${lower}" in
+        2b)  upper="2B"  ;;
+        4b)  upper="4B"  ;;
+        9b)  upper="9B"  ;;
+        27b) upper="27B" ;;
+    esac
+    target="${GGUF_DIR}/qwen3.5-${lower}-instruct-q4_k_m.gguf"
     src_file="Qwen3.5-${upper}-${QUANT}.gguf"
     src_repo="${HF_REPO_PREFIX}${upper}${HF_REPO_SUFFIX}"
 
@@ -64,13 +86,24 @@ for lower in 2b 4b 9b 27b; do
     fi
 
     echo "↓ ${src_repo}  →  ${src_file}"
-    huggingface-cli download "${src_repo}" "${src_file}" \
-        --local-dir . --local-dir-use-symlinks False
+    # Call the huggingface_hub library directly (bypasses the broken
+    # ~/.local/bin/huggingface-cli wrapper that pip generated under
+    # Tykky). hf_hub_download writes the file into local_dir with its
+    # original name; we rename to the lowercase convention below.
+    python - <<PY
+from huggingface_hub import hf_hub_download
+path = hf_hub_download(
+    repo_id="${src_repo}",
+    filename="${src_file}",
+    local_dir="${GGUF_DIR}",
+    local_dir_use_symlinks=False,
+)
+print(f"  downloaded → {path}")
+PY
 
-    # huggingface-cli download preserves the source filename; rename to
-    # the lowercase convention the SLURM script and swap config expect.
-    if [[ -f "${src_file}" && "${src_file}" != "${target}" ]]; then
-        mv "${src_file}" "${target}"
+    src_path="${GGUF_DIR}/${src_file}"
+    if [[ -f "${src_path}" && "${src_path}" != "${target}" ]]; then
+        mv "${src_path}" "${target}"
     fi
     echo "  → ${target}"
 done
