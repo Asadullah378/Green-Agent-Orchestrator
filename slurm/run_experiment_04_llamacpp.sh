@@ -177,15 +177,11 @@ echo "  ${RENDERED_SWAP_CONFIG}"
 grep -E "^\s*--model" "${RENDERED_SWAP_CONFIG}" || true
 
 # ---------------------------------------------------------------------------
-# Start llama-swap inside Apptainer. llama-swap itself is a small
-# statically-linked Go binary that lives on the HOST under
-# ${LLAMA_SWAP_BIN}; it is visible inside the container at the same
-# path via the ${PROJECT_DIR} bind mount, so we just invoke it by its
-# absolute host path. The `llama-server` subprocesses it spawns are
-# the ones baked into ${LLAMACPP_SIF} (with CUDA support).
+# Common Apptainer flags used both for the diagnostic and for llama-swap
+# itself. Centralised so a fix in one place applies to both.
 #
-# We use `apptainer exec` (NOT `apptainer run`): `run` invokes the
-# image's runscript, and for this Docker-converted image that runscript
+# We use `apptainer exec` (NOT `apptainer run`) for both: `run` invokes
+# the image's runscript, and for this Docker-converted image that runscript
 # wraps `ENTRYPOINT=["/app/llama-server"]`, so any positional args we
 # pass would be handed to llama-server, not executed as a separate
 # binary. `exec` bypasses the runscript and runs our command directly.
@@ -201,12 +197,100 @@ grep -E "^\s*--model" "${RENDERED_SWAP_CONFIG}" || true
 # /usr/local/lib is included as a fallback in case a future image
 # version re-locates the .so files.
 # ---------------------------------------------------------------------------
+APPTAINER_COMMON_FLAGS=(
+    --nv
+    --home "${CONTAINER_HOME}:/root"
+    --bind "${PROJECT_DIR}:${PROJECT_DIR}"
+    --env "PATH=/app:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    --env "LD_LIBRARY_PATH=/app:/usr/local/lib:/usr/lib/x86_64-linux-gnu"
+)
+
+# ---------------------------------------------------------------------------
+# Diagnostic: verify llama-server can actually load a GGUF and serve a
+# request on this GPU BEFORE handing off to llama-swap. llama-swap
+# captures subprocess exits but does not forward llama-server's own
+# stderr, so when an instance crashes during init all we see in the
+# SLURM log is a useless "ExitError >> signal: aborted, exit code: -1".
+# Running llama-server directly here surfaces the real error (bad
+# flag, missing CUDA runtime, GGUF incompatibility, OOM, etc.) into
+# the SLURM .err log.
+#
+# We use the smallest GGUF (2B) so this only adds ~30 s overhead on a
+# healthy run. Set GAO_SKIP_LLAMACPP_DIAGNOSTIC=1 to skip.
+# ---------------------------------------------------------------------------
+if [[ "${GAO_SKIP_LLAMACPP_DIAGNOSTIC:-0}" != "1" ]]; then
+    SMALL_GGUF="${GGUF_DIR}/qwen3.5-2b-instruct-q4_k_m.gguf"
+    DIAG_LOG="${ARTIFACT_DIR}/llama-server-diagnostic.log"
+
+    echo "Diagnostic: starting llama-server directly with the 2B model on :19999…"
+    apptainer exec "${APPTAINER_COMMON_FLAGS[@]}" \
+        "${LLAMACPP_SIF}" \
+        llama-server \
+            --model "${SMALL_GGUF}" \
+            --port 19999 \
+            --host 127.0.0.1 \
+            --ctx-size 1024 \
+            --n-gpu-layers 99 \
+            --jinja \
+            --metrics \
+            > "${DIAG_LOG}" 2>&1 &
+    DIAG_PID=$!
+
+    diag_ok=0
+    for _ in {1..60}; do
+        if curl -fs http://127.0.0.1:19999/health > /dev/null 2>&1; then
+            diag_ok=1
+            echo "  ✓ llama-server diagnostic OK — model loaded and /health responded."
+            break
+        fi
+        if ! kill -0 "${DIAG_PID}" 2>/dev/null; then
+            cat >&2 <<EOF
+
+ERROR: llama-server crashed during the diagnostic. Full output:
+-----------------------------------------------------------------
+$(cat "${DIAG_LOG}")
+-----------------------------------------------------------------
+
+Common causes:
+  - Bad CLI flag (e.g. --jinja or --metrics not supported by this
+    llama-server build). Try removing them from the cmd: blocks in
+    configs/experiments/04_qwen3.5_llamacpp.swap.yaml.
+  - CUDA runtime / driver mismatch. Confirm the container's CUDA libs
+    are compatible with the host driver (see 'nvidia-smi' on a compute
+    node and the image's CUDA major version).
+  - GGUF format incompatibility (e.g. the model architecture is not
+    yet supported by this llama.cpp build).
+EOF
+            exit 1
+        fi
+        sleep 2
+    done
+    kill "${DIAG_PID}" 2>/dev/null || true
+    wait "${DIAG_PID}" 2>/dev/null || true
+
+    if [[ "${diag_ok}" -ne 1 ]]; then
+        cat >&2 <<EOF
+
+ERROR: llama-server diagnostic did not become healthy after 120 s.
+Full output:
+-----------------------------------------------------------------
+$(cat "${DIAG_LOG}")
+-----------------------------------------------------------------
+EOF
+        exit 1
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Start llama-swap inside Apptainer. llama-swap itself is a small
+# statically-linked Go binary that lives on the HOST under
+# ${LLAMA_SWAP_BIN}; it is visible inside the container at the same
+# path via the ${PROJECT_DIR} bind mount, so we just invoke it by its
+# absolute host path. The `llama-server` subprocesses it spawns are
+# the ones baked into ${LLAMACPP_SIF} (with CUDA support).
+# ---------------------------------------------------------------------------
 echo "Starting llama-swap proxy on :8080…"
-apptainer exec --nv \
-    --home "${CONTAINER_HOME}:/root" \
-    --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
-    --env "PATH=/app:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    --env "LD_LIBRARY_PATH=/app:/usr/local/lib:/usr/lib/x86_64-linux-gnu" \
+apptainer exec "${APPTAINER_COMMON_FLAGS[@]}" \
     "${LLAMACPP_SIF}" \
     "${LLAMA_SWAP_BIN}" \
         --config "${RENDERED_SWAP_CONFIG}" \
