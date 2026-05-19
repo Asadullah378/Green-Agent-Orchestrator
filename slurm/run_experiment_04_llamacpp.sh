@@ -8,26 +8,31 @@
 # script: there is no Ollama server in this job, and the Apptainer image
 # used here must contain `llama-server` and `llama-swap` instead.
 #
-# One-time setup on Mahti (do this before submitting):
+# One-time setup on Mahti (do this before submitting). Everything lives
+# under the same /scratch/project_2013898/ollama_env/ tree as the rest of
+# the project — there is no separate llamacpp_env directory.
 #
 #   1. Build / pull an Apptainer image that contains llama.cpp + llama-swap.
 #      A typical recipe (Dockerfile-equivalent) installs:
 #          apt: build-essential cmake curl git
 #          git clone https://github.com/ggerganov/llama.cpp && cmake build
 #          go install github.com/mostlygeek/llama-swap@latest
-#      Save it as /scratch/project_2013898/llamacpp_env/llamacpp.sif
+#      Save it as /scratch/project_2013898/ollama_env/llamacpp.sif
 #
 #   2. Download Qwen 3.5 GGUF checkpoints to
-#      /scratch/project_2013898/llamacpp_env/models/qwen3.5/:
+#      /scratch/project_2013898/ollama_env/gguf/qwen3.5/:
 #          qwen3.5-2b-instruct-q4_k_m.gguf
 #          qwen3.5-4b-instruct-q4_k_m.gguf
 #          qwen3.5-9b-instruct-q4_k_m.gguf
 #          qwen3.5-27b-instruct-q4_k_m.gguf
-#      (For Qwen GGUFs see https://huggingface.co/Qwen)
+#      (For Qwen GGUFs see https://huggingface.co/Qwen.) GGUFs are kept in
+#      a separate `gguf/` subfolder so they don't collide with the Ollama
+#      blobs already under `models/`.
 #
-#   3. Update the absolute paths in
-#      configs/experiments/04_qwen3.5_llamacpp.swap.yaml to point at the
-#      Mahti scratch paths above.
+#   3. On Mahti, edit configs/experiments/04_qwen3.5_llamacpp.swap.yaml so
+#      every `--model` path points at the Mahti scratch location, e.g.
+#          /scratch/project_2013898/ollama_env/gguf/qwen3.5/qwen3.5-27b-instruct-q4_k_m.gguf
+#      The repo copy uses macOS dev paths because it is also used locally.
 #
 # Submit with:
 #   sbatch slurm/run_experiment_04_llamacpp.sh
@@ -62,13 +67,30 @@ echo "================================================================"
 module load apptainer
 module load python-data
 
-PROJECT_DIR="/scratch/project_2013898/llamacpp_env"
+PROJECT_DIR="/scratch/project_2013898/ollama_env"
 LLAMACPP_SIF="${PROJECT_DIR}/llamacpp.sif"
-REPO_DIR="/scratch/project_2013898/ollama_env/Green-Agent-Orchestrator"
-GGUF_DIR="${PROJECT_DIR}/models/qwen3.5"
+REPO_DIR="${PROJECT_DIR}/Green-Agent-Orchestrator"
+GGUF_DIR="${PROJECT_DIR}/gguf/qwen3.5"
 
 cd "${REPO_DIR}"
 mkdir -p slurm/logs
+
+# Sanity-check that the GGUF files and image are actually present, since
+# llama-swap's failure mode for a missing model is a confusing
+# "process exited with status 1" several minutes into the run.
+for f in qwen3.5-2b-instruct-q4_k_m.gguf \
+         qwen3.5-4b-instruct-q4_k_m.gguf \
+         qwen3.5-9b-instruct-q4_k_m.gguf \
+         qwen3.5-27b-instruct-q4_k_m.gguf; do
+    if [[ ! -f "${GGUF_DIR}/${f}" ]]; then
+        echo "ERROR: missing GGUF file ${GGUF_DIR}/${f}" >&2
+        exit 1
+    fi
+done
+if [[ ! -f "${LLAMACPP_SIF}" ]]; then
+    echo "ERROR: missing Apptainer image ${LLAMACPP_SIF}" >&2
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Start llama-swap inside Apptainer. llama-swap will spawn llama-server
@@ -77,7 +99,6 @@ mkdir -p slurm/logs
 echo "Starting llama-swap proxy on :8080…"
 apptainer run --nv \
     --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
-    --bind "${REPO_DIR}:${REPO_DIR}" \
     "${LLAMACPP_SIF}" \
     llama-swap \
         --config "${REPO_DIR}/${SWAP_CONFIG}" \

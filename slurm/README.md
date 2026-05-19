@@ -51,7 +51,21 @@ sbatch slurm/run_experiment_04_llamacpp.sh
 
 ## One-time setup (already in place, listed for reference)
 
-1. Build / pull the Ollama Apptainer image into
+Everything lives under `/scratch/project_2013898/ollama_env/`:
+
+```
+/scratch/project_2013898/ollama_env/
+├── Green-Agent-Orchestrator/       # this repository (with .venv inside)
+├── models/                         # Ollama model store (bind-mounted into ollama.sif)
+├── ollama.sif                      # Apptainer image for Ollama (experiments 1-3, 5, 6)
+├── llamacpp.sif                    # Apptainer image for llama.cpp + llama-swap (experiment 4)
+├── gguf/qwen3.5/                   # GGUF checkpoints for experiment 4
+└── run_ollama_server.sh            # legacy single-experiment launcher
+```
+
+Required steps if you are starting from a fresh project directory:
+
+1. Build / pull the Ollama Apptainer image at
    `/scratch/project_2013898/ollama_env/ollama.sif`.
 2. Clone the repository at
    `/scratch/project_2013898/ollama_env/Green-Agent-Orchestrator` and
@@ -59,11 +73,13 @@ sbatch slurm/run_experiment_04_llamacpp.sh
    -r requirements.txt`).
 3. For experiment 04, additionally build a llama.cpp + llama-swap
    Apptainer image at
-   `/scratch/project_2013898/llamacpp_env/llamacpp.sif` and download the
+   `/scratch/project_2013898/ollama_env/llamacpp.sif` and download the
    Qwen 3.5 GGUF checkpoints into
-   `/scratch/project_2013898/llamacpp_env/models/qwen3.5/`. The Mahti
-   absolute paths must then be reflected in
-   `configs/experiments/04_qwen3.5_llamacpp.swap.yaml`.
+   `/scratch/project_2013898/ollama_env/gguf/qwen3.5/`. Then edit
+   `configs/experiments/04_qwen3.5_llamacpp.swap.yaml` so every
+   `--model` path points at the Mahti GGUF location instead of the
+   macOS dev path. (The repo copy uses macOS paths because it is also
+   used locally.)
 
 ## Resource sizing notes
 
