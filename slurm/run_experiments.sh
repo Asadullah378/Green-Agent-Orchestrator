@@ -20,7 +20,7 @@
 
 #SBATCH --job-name=gao-experiments
 #SBATCH --account=project_2013898
-#SBATCH --partition=gpumedium
+#SBATCH --partition=gpusmall
 #SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

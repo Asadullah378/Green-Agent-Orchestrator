@@ -83,17 +83,21 @@ Required steps if you are starting from a fresh project directory:
 
 ## Resource sizing notes
 
+Both scripts request a **single A100** on the `gpusmall` partition, which
+allows 1–2 GPUs and up to 36 h of wall time. `gpumedium` cannot be used
+because Mahti requires it to be claimed at full 4-GPU width.
+
 | Experiment | Largest model loaded | Peak GPU memory | Notes |
 |---|---|---|---|
 | 01 | qwen3.5:27b q4 | ~17 GB | Comfortably fits on one A100. |
 | 02 | qwen3.5:9b | ~7 GB | |
 | 03 | qwen3.5:9b (worker) | ~7 GB | Hetero pool still includes 9B. |
 | 04 | qwen3.5-27b GGUF q4 | ~17 GB | Same as exp 01, but via llama.cpp. |
-| 05 | mistral-large:latest | ~70 GB | Tight on one A100 80 GB. Consider `--gres=gpu:a100:2`. |
+| 05 | mistral-large:latest | ~70 GB | Tight on one A100 80 GB. Consider `--gres=gpu:a100:2` (still `gpusmall`). |
 | 06 | gemma4:31b | ~20 GB | Fits on one A100. |
 
 If experiment 05 OOMs on one A100, edit the `#SBATCH --gres=` line to
-`gpu:a100:2` and let Ollama shard the layers.
+`gpu:a100:2` (the `gpusmall` partition still allows two GPUs).
 
 ## Re-running just the analysis
 
