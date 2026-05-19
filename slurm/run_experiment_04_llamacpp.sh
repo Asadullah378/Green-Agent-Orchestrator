@@ -184,20 +184,25 @@ grep -E "^\s*--model" "${RENDERED_SWAP_CONFIG}" || true
 # absolute host path. The `llama-server` subprocesses it spawns are
 # the ones baked into ${LLAMACPP_SIF} (with CUDA support).
 #
+# We use `apptainer exec` (NOT `apptainer run`): `run` invokes the
+# image's runscript, and for this Docker-converted image that runscript
+# wraps `ENTRYPOINT=["/app/llama-server"]`, so any positional args we
+# pass would be handed to llama-server, not executed as a separate
+# binary. `exec` bypasses the runscript and runs our command directly.
+#
 # IMPORTANT: the ggml-org llama.cpp:server-cuda image installs
-# llama-server at /app/llama-server and exposes it via ENTRYPOINT —
-# `apptainer exec`/`run` bypass ENTRYPOINT, so neither /app on $PATH
-# nor /app on $LD_LIBRARY_PATH is set up for us. We add both
-# explicitly so:
+# llama-server at /app/llama-server with its shared libraries
+# (libllama-common.so.0 etc) sitting next to it in /app. The
+# ENTRYPOINT setup arranges PATH and the dynamic-linker search; once
+# we bypass it, we have to set both explicitly so:
 #   * llama-swap's `cmd: llama-server` entries (in the rendered swap
 #     config) resolve to /app/llama-server via PATH lookup;
-#   * the dynamic linker can find libllama-common.so.0 etc, which
-#     live next to the binary in /app.
+#   * the dynamic linker can find libllama-common.so.0 etc.
 # /usr/local/lib is included as a fallback in case a future image
 # version re-locates the .so files.
 # ---------------------------------------------------------------------------
 echo "Starting llama-swap proxy on :8080…"
-apptainer run --nv \
+apptainer exec --nv \
     --home "${CONTAINER_HOME}:/root" \
     --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
     --env "PATH=/app:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
@@ -217,13 +222,26 @@ trap cleanup EXIT
 
 # Wait for the proxy to be reachable
 echo "Waiting for llama-swap API on http://localhost:8080…"
+api_up=0
 for _ in {1..60}; do
     if curl -fs http://localhost:8080/v1/models > /dev/null 2>&1; then
+        api_up=1
         echo "llama-swap API is up."
         break
     fi
+    # Bail out early if the background llama-swap process has already
+    # died — otherwise we sit through the full 120 s timeout for nothing.
+    if ! kill -0 "${SWAP_PID}" 2>/dev/null; then
+        echo "ERROR: llama-swap (pid=${SWAP_PID}) exited before the API came up." >&2
+        echo "       Inspect slurm/logs/exp04_${SLURM_JOB_ID:-local}.err for its stderr." >&2
+        exit 1
+    fi
     sleep 2
 done
+if [[ "${api_up}" -ne 1 ]]; then
+    echo "ERROR: llama-swap API never came up after 120 s on http://localhost:8080." >&2
+    exit 1
+fi
 
 # Sanity check: verify all four model aliases are visible
 echo "Models reported by llama-swap:"
