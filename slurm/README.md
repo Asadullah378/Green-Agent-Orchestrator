@@ -74,7 +74,8 @@ Everything lives under `/scratch/project_2013898/ollama_env/`:
 ├── models/                         # Ollama model store (bind-mounted into ollama.sif)
 ├── container_home/                 # writable HOME for the Apptainer container
 ├── ollama.sif                      # Apptainer image for Ollama (experiments 1-3, 5, 6)
-├── llamacpp.sif                    # Apptainer image for llama.cpp + llama-swap (experiment 4)
+├── llamacpp.sif                    # Apptainer image for llama.cpp `llama-server` (experiment 4)
+├── bin/llama-swap                  # statically-linked llama-swap Go binary (experiment 4)
 ├── gguf/qwen3.5/                   # GGUF checkpoints for experiment 4
 └── run_ollama_server.sh            # legacy single-experiment launcher
 ```
@@ -87,23 +88,27 @@ Required steps if you are starting from a fresh project directory:
    `/scratch/project_2013898/ollama_env/Green-Agent-Orchestrator` and
    create the Python venv inside it (`python -m venv .venv && pip install
    -r requirements.txt`).
-3. For experiment 04, additionally build a llama.cpp + llama-swap
-   Apptainer image at `/scratch/project_2013898/ollama_env/llamacpp.sif`,
-   then download the Qwen 3.5 GGUF checkpoints with the bundled helper
-   (run **on a Mahti login node** — compute nodes have no outbound
-   internet):
+3. For experiment 04, two one-time setup steps are needed, both run on
+   a **Mahti login node** (compute nodes have no outbound internet):
 
    ```bash
    cd /scratch/project_2013898/ollama_env/Green-Agent-Orchestrator
+
+   # a) Pull the CUDA-enabled llama.cpp Apptainer image and the
+   #    llama-swap Go binary into ${PROJECT_DIR}.
+   bash slurm/setup_llamacpp_env.sh
+
+   # b) Download the four Q4_K_M Qwen 3.5 GGUFs into
+   #    ${PROJECT_DIR}/gguf/qwen3.5/.
    bash slurm/download_qwen3.5_ggufs.sh
    ```
 
-   The helper pulls the four Q4_K_M GGUFs from `unsloth/Qwen3.5-<SIZE>-GGUF`,
-   places them under `/scratch/project_2013898/ollama_env/gguf/qwen3.5/`,
-   and renames them to the `qwen3.5-<size>-instruct-q4_k_m.gguf` convention
-   the rest of the project uses. Re-running is cheap (existing files are
-   skipped). No edit to `configs/experiments/04_qwen3.5_llamacpp.swap.yaml`
-   is required — the SLURM script auto-rewrites the macOS dev paths to
+   Both helpers are idempotent — existing files are skipped, so
+   re-running is cheap. `setup_llamacpp_env.sh` accepts env overrides
+   for the image (`LLAMACPP_IMAGE`) and llama-swap version
+   (`LLAMA_SWAP_VERSION`) if you ever need to bump them. No manual
+   edit of `configs/experiments/04_qwen3.5_llamacpp.swap.yaml` is
+   required — the SLURM script auto-rewrites the macOS dev paths to
    the Mahti scratch paths on the fly.
 
 ## Resource sizing notes

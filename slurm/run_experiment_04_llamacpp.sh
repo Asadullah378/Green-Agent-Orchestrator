@@ -8,29 +8,25 @@
 # script: there is no Ollama server in this job, and the Apptainer image
 # used here must contain `llama-server` and `llama-swap` instead.
 #
-# One-time setup on Mahti (do this before submitting). Everything lives
-# under the same /scratch/project_2013898/ollama_env/ tree as the rest of
-# the project — there is no separate llamacpp_env directory.
+# One-time setup on Mahti (do this on a LOGIN node before submitting —
+# compute nodes have no outbound internet). Everything lives under
+# /scratch/project_2013898/ollama_env/:
 #
-#   1. Build / pull an Apptainer image that contains llama.cpp + llama-swap.
-#      A typical recipe (Dockerfile-equivalent) installs:
-#          apt: build-essential cmake curl git
-#          git clone https://github.com/ggerganov/llama.cpp && cmake build
-#          go install github.com/mostlygeek/llama-swap@latest
-#      Save it as /scratch/project_2013898/ollama_env/llamacpp.sif
+#   1. Prepare the llama.cpp Apptainer image and the llama-swap binary:
+#          bash slurm/setup_llamacpp_env.sh
+#      This pulls a CUDA-enabled llama.cpp image (provides `llama-server`)
+#      into ${PROJECT_DIR}/llamacpp.sif and downloads a statically-linked
+#      llama-swap Go binary into ${PROJECT_DIR}/bin/llama-swap. llama-swap
+#      is run from the host (it is visible inside the container via the
+#      ${PROJECT_DIR} bind mount), so it does not need to live in the SIF.
 #
-#   2. Download Qwen 3.5 GGUF checkpoints to
-#      /scratch/project_2013898/ollama_env/gguf/qwen3.5/:
-#          qwen3.5-2b-instruct-q4_k_m.gguf
-#          qwen3.5-4b-instruct-q4_k_m.gguf
-#          qwen3.5-9b-instruct-q4_k_m.gguf
-#          qwen3.5-27b-instruct-q4_k_m.gguf
-#      The easiest way is the bundled helper, which pulls from
-#      unsloth/Qwen3.5-<SIZE>-GGUF and renames to the lowercase convention:
+#   2. Download the four Qwen 3.5 GGUF checkpoints into
+#      ${PROJECT_DIR}/gguf/qwen3.5/:
 #          bash slurm/download_qwen3.5_ggufs.sh
-#      Run it on a LOGIN node — compute nodes have no outbound internet.
-#      GGUFs are kept in a separate `gguf/` subfolder so they don't
-#      collide with the Ollama blobs already under `models/`.
+#      The helper pulls from unsloth/Qwen3.5-<SIZE>-GGUF and renames the
+#      files to the qwen3.5-<size>-instruct-q4_k_m.gguf convention.
+#      Kept in a separate `gguf/` subfolder so they don't collide with
+#      the Ollama blobs already under `models/`.
 #
 #   3. No manual edit of configs/experiments/04_qwen3.5_llamacpp.swap.yaml
 #      is required. The repo copy keeps macOS dev paths so it stays usable
@@ -82,6 +78,7 @@ fi
 
 PROJECT_DIR="/scratch/project_2013898/ollama_env"
 LLAMACPP_SIF="${PROJECT_DIR}/llamacpp.sif"
+LLAMA_SWAP_BIN="${PROJECT_DIR}/bin/llama-swap"
 REPO_DIR="${PROJECT_DIR}/Green-Agent-Orchestrator"
 GGUF_DIR="${PROJECT_DIR}/gguf/qwen3.5"
 # Writable scratch directory used as in-container HOME (Mahti policy blocks
@@ -129,8 +126,27 @@ Once it finishes, re-submit:
 EOF
     exit 1
 fi
-if [[ ! -f "${LLAMACPP_SIF}" ]]; then
-    echo "ERROR: missing Apptainer image ${LLAMACPP_SIF}" >&2
+if [[ ! -f "${LLAMACPP_SIF}" || ! -x "${LLAMA_SWAP_BIN}" ]]; then
+    cat >&2 <<EOF
+
+The llama.cpp + llama-swap environment is not set up yet.
+Missing:
+$([[ ! -f "${LLAMACPP_SIF}"  ]] && echo "  - ${LLAMACPP_SIF}")
+$([[ ! -x "${LLAMA_SWAP_BIN}" ]] && echo "  - ${LLAMA_SWAP_BIN}")
+
+Compute nodes have no outbound internet, so both pieces have to be
+prepared once from a Mahti LOGIN node:
+
+  ssh mahti-login11    # or any login node
+  cd ${REPO_DIR}
+  bash slurm/setup_llamacpp_env.sh
+
+That helper pulls the CUDA-enabled llama.cpp Apptainer image and the
+llama-swap Go binary into ${PROJECT_DIR}.
+
+Once it finishes, re-submit:
+  sbatch slurm/run_experiment_04_llamacpp.sh
+EOF
     exit 1
 fi
 
@@ -161,15 +177,19 @@ echo "  ${RENDERED_SWAP_CONFIG}"
 grep -E "^\s*--model" "${RENDERED_SWAP_CONFIG}" || true
 
 # ---------------------------------------------------------------------------
-# Start llama-swap inside Apptainer. llama-swap will spawn llama-server
-# instances on demand using the commands declared in the rendered config.
+# Start llama-swap inside Apptainer. llama-swap itself is a small
+# statically-linked Go binary that lives on the HOST under
+# ${LLAMA_SWAP_BIN}; it is visible inside the container at the same
+# path via the ${PROJECT_DIR} bind mount, so we just invoke it by its
+# absolute host path. The `llama-server` subprocesses it spawns are
+# the ones baked into ${LLAMACPP_SIF} (with CUDA support).
 # ---------------------------------------------------------------------------
 echo "Starting llama-swap proxy on :8080…"
 apptainer run --nv \
     --home "${CONTAINER_HOME}:/root" \
     --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
     "${LLAMACPP_SIF}" \
-    llama-swap \
+    "${LLAMA_SWAP_BIN}" \
         --config "${RENDERED_SWAP_CONFIG}" \
         --listen :8080 &
 SWAP_PID=$!
