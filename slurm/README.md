@@ -6,16 +6,52 @@ at CSC, using project `project_2013898`.
 
 ## What runs where
 
-| Experiment | Backend | SLURM script | Submit command |
+| Experiment | Backend | Array slot | Standalone script |
 |---|---|---|---|
-| 01–03, 05–06 | Ollama (inside Apptainer) | `run_experiments.sh` | `sbatch slurm/run_experiments.sh` |
-| 04 | llama.cpp + llama-swap (inside Apptainer) | `run_experiment_04_llamacpp.sh` | `sbatch slurm/run_experiment_04_llamacpp.sh` |
+| 01_qwen3.5_default | Ollama | `--array=1` | `run_experiment_01_qwen3.5_default.sh` |
+| 02_qwen3.5_homo_9b | Ollama | `--array=2` | `run_experiment_02_qwen3.5_homo_9b.sh` |
+| 03_qwen3.5_homo_4b | Ollama | `--array=3` | `run_experiment_03_qwen3.5_homo_4b.sh` |
+| 04_qwen3.5_llamacpp | llama.cpp + llama-swap | — | `run_experiment_04_llamacpp.sh` |
+| 05_mistral | Ollama | `--array=5` (1 GPU) | `run_experiment_05_mistral.sh` (**2 GPUs**) |
+| 06_gemma4 | Ollama | `--array=6` | `run_experiment_06_gemma4.sh` |
 
-Experiments 1, 2, 3, 5, 6 are submitted as a single SLURM **job array**
-(`#SBATCH --array=1,2,3,5,6`), so each experiment gets its own job,
-runs in parallel when GPUs are available, and is allotted its own
-12-hour wall clock without blocking the others. Experiment 04 needs a
-different inference stack and is therefore submitted as a separate job.
+Experiments 1, 2, 3, 5, 6 can be submitted together as a single SLURM
+**job array** (`run_experiments.sh`, `#SBATCH --array=1,2,3,5,6`) so they
+run in parallel when GPUs are available, each in its own 12-hour wall
+clock. Each experiment also has a **standalone wrapper** so you can
+re-run a single one without touching the others.
+
+All scripts share a single helper, `_run_experiment_common.sh`, which
+encapsulates the Apptainer + Ollama lifecycle. Editing that one file
+changes the behaviour of every launcher in this directory.
+
+## Submitting
+
+```bash
+# All five Ollama experiments (job array)
+sbatch slurm/run_experiments.sh
+
+# Re-run one experiment via the array
+sbatch --array=6 slurm/run_experiments.sh
+
+# Re-run one experiment via its standalone wrapper
+sbatch slurm/run_experiment_06_gemma4.sh
+
+# llama.cpp experiment (separate stack)
+sbatch slurm/run_experiment_04_llamacpp.sh
+```
+
+### ⚠ Experiment 05 needs 2 GPUs
+
+`mistral-large:latest` is ~73 GB on disk and **will not fit on a single
+A100-40GB**. Always submit exp 05 via the standalone script:
+
+```bash
+sbatch slurm/run_experiment_05_mistral.sh   # requests --gres=gpu:a100:2
+```
+
+Submitting exp 05 through the 1-GPU array (`sbatch --array=5
+slurm/run_experiments.sh`) will most likely OOM at inference time.
 
 ## Output layout
 
@@ -32,22 +68,13 @@ results/06_gemma4/
 
 Each subdirectory contains the raw JSON, the per-task CSV, all generated
 figures (`figures/`), all LaTeX tables (`tables/`), and aggregate CSV
-exports (`csv/`).
+exports (`csv/`). Filenames are timestamped (`results_<exp>_<YYYYMMDD_HHMMSS>.json`)
+so re-runs never overwrite earlier ones.
 
-SLURM stdout/stderr land under `slurm/logs/` (auto-created).
+SLURM stdout/stderr land under `slurm/logs/` (auto-created):
 
-## Submitting
-
-```bash
-# All five Ollama experiments (job array)
-sbatch slurm/run_experiments.sh
-
-# Only experiment 06 (re-run a single one):
-sbatch --array=6 slurm/run_experiments.sh
-
-# Experiment 04 (llama.cpp), after the one-time GGUF + image setup:
-sbatch slurm/run_experiment_04_llamacpp.sh
-```
+- Array runs: `exp<N>_<arrayjobid>.{out,err}`
+- Standalone runs: `exp0N_<jobid>.{out,err}`
 
 ## One-time setup (already in place, listed for reference)
 
@@ -57,6 +84,7 @@ Everything lives under `/scratch/project_2013898/ollama_env/`:
 /scratch/project_2013898/ollama_env/
 ├── Green-Agent-Orchestrator/       # this repository (with .venv inside)
 ├── models/                         # Ollama model store (bind-mounted into ollama.sif)
+├── container_home/                 # writable HOME for the Apptainer container
 ├── ollama.sif                      # Apptainer image for Ollama (experiments 1-3, 5, 6)
 ├── llamacpp.sif                    # Apptainer image for llama.cpp + llama-swap (experiment 4)
 ├── gguf/qwen3.5/                   # GGUF checkpoints for experiment 4
@@ -83,21 +111,29 @@ Required steps if you are starting from a fresh project directory:
 
 ## Resource sizing notes
 
-Both scripts request a **single A100** on the `gpusmall` partition, which
-allows 1–2 GPUs and up to 36 h of wall time. `gpumedium` cannot be used
-because Mahti requires it to be claimed at full 4-GPU width.
+All scripts target the `gpusmall` partition (1–2 A100-40GB, up to 36 h
+of wall time). `gpumedium` cannot be used because Mahti requires it to
+be claimed at full 4-GPU width.
 
-| Experiment | Largest model loaded | Peak GPU memory | Notes |
+| Experiment | Largest model loaded | Approx GPU memory | Notes |
 |---|---|---|---|
 | 01 | qwen3.5:27b q4 | ~17 GB | Comfortably fits on one A100. |
 | 02 | qwen3.5:9b | ~7 GB | |
 | 03 | qwen3.5:9b (worker) | ~7 GB | Hetero pool still includes 9B. |
 | 04 | qwen3.5-27b GGUF q4 | ~17 GB | Same as exp 01, but via llama.cpp. |
-| 05 | mistral-large:latest | ~70 GB | Tight on one A100 80 GB. Consider `--gres=gpu:a100:2` (still `gpusmall`). |
+| 05 | mistral-large:latest | ~70 GB | **Requires 2× A100.** Use the standalone script. |
 | 06 | gemma4:31b | ~20 GB | Fits on one A100. |
 
-If experiment 05 OOMs on one A100, edit the `#SBATCH --gres=` line to
-`gpu:a100:2` (the `gpusmall` partition still allows two GPUs).
+## Ollama model names
+
+A couple of Ollama Hub names that have caught us out — use these exact
+tags when adding new experiments:
+
+| Family | Wrong name | Correct Ollama tag |
+|---|---|---|
+| Ministral (3B / 8B / 14B) | `ministral:3b` | `ministral-3:3b` |
+| Mistral Large (latest, ~73 GB q4) | — | `mistral-large:latest` |
+| Gemma 4 edge models | `gemma4:e2b` | (correct, kept as-is) |
 
 ## Re-running just the analysis
 
@@ -109,4 +145,4 @@ GPU:
 python -m src.analyze_results results/06_gemma4/results_06_gemma4_<timestamp>.json
 ```
 
-Figures and tables will be written back into the same directory.
+Figures and tables are written back into the same directory.

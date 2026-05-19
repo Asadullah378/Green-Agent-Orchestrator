@@ -7,9 +7,14 @@
 #
 # Pull the models before running:
 #   ollama pull mistral-large:latest
-#   ollama pull ministral:3b
-#   ollama pull ministral:8b
-#   ollama pull ministral:14b
+#   ollama pull ministral-3:3b
+#   ollama pull ministral-3:8b
+#   ollama pull ministral-3:14b
+#
+# NOTE: On Ollama Hub the Ministral family is published under the
+# `ministral-3` namespace (NOT `ministral`). `mistral-large:latest`
+# is ~73 GB on disk and will not fit on a single A100-40GB — use a
+# node with at least 2x A100-40GB (e.g. gpusmall with --gres=gpu:a100:2).
 #
 # Run:
 #   python -m src.run_experiment --config configs/experiments/05_mistral.yaml
@@ -45,26 +50,26 @@ homogeneous:
 
 heterogeneous:
   orchestrator:
-    model: "ministral:8b"
+    model: "ministral-3:8b"
     size_b: 8
 
   synthesizer:
-    model: "ministral:3b"
+    model: "ministral-3:3b"
     size_b: 3
 
   workers:
     - tier: "small"
-      model: "ministral:3b"
+      model: "ministral-3:3b"
       size_b: 3
       max_steps: 10
       description: "Simple subtasks — 1 to 2 total tool invocations."
     - tier: "medium"
-      model: "ministral:8b"
+      model: "ministral-3:8b"
       size_b: 8
       max_steps: 15
       description: "Moderate subtasks — 3 to 5 tool invocations or multi-step math."
     - tier: "large"
-      model: "ministral:14b"
+      model: "ministral-3:14b"
       size_b: 14
       max_steps: 25
       description: "Complex subtasks — 6 or more tool invocations or advanced reasoning."
