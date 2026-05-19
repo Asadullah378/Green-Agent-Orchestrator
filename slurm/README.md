@@ -100,14 +100,23 @@ Required steps if you are starting from a fresh project directory:
    create the Python venv inside it (`python -m venv .venv && pip install
    -r requirements.txt`).
 3. For experiment 04, additionally build a llama.cpp + llama-swap
-   Apptainer image at
-   `/scratch/project_2013898/ollama_env/llamacpp.sif` and download the
-   Qwen 3.5 GGUF checkpoints into
-   `/scratch/project_2013898/ollama_env/gguf/qwen3.5/`. Then edit
-   `configs/experiments/04_qwen3.5_llamacpp.swap.yaml` so every
-   `--model` path points at the Mahti GGUF location instead of the
-   macOS dev path. (The repo copy uses macOS paths because it is also
-   used locally.)
+   Apptainer image at `/scratch/project_2013898/ollama_env/llamacpp.sif`,
+   then download the Qwen 3.5 GGUF checkpoints with the bundled helper
+   (run **on a Mahti login node** — compute nodes have no outbound
+   internet):
+
+   ```bash
+   cd /scratch/project_2013898/ollama_env/Green-Agent-Orchestrator
+   bash slurm/download_qwen3.5_ggufs.sh
+   ```
+
+   The helper pulls the four Q4_K_M GGUFs from `unsloth/Qwen3.5-<SIZE>-GGUF`,
+   places them under `/scratch/project_2013898/ollama_env/gguf/qwen3.5/`,
+   and renames them to the `qwen3.5-<size>-instruct-q4_k_m.gguf` convention
+   the rest of the project uses. Re-running is cheap (existing files are
+   skipped). No edit to `configs/experiments/04_qwen3.5_llamacpp.swap.yaml`
+   is required — the SLURM script auto-rewrites the macOS dev paths to
+   the Mahti scratch paths on the fly.
 
 ## Resource sizing notes
 

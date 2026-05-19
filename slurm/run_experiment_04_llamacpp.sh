@@ -25,9 +25,12 @@
 #          qwen3.5-4b-instruct-q4_k_m.gguf
 #          qwen3.5-9b-instruct-q4_k_m.gguf
 #          qwen3.5-27b-instruct-q4_k_m.gguf
-#      (For Qwen GGUFs see https://huggingface.co/Qwen.) GGUFs are kept in
-#      a separate `gguf/` subfolder so they don't collide with the Ollama
-#      blobs already under `models/`.
+#      The easiest way is the bundled helper, which pulls from
+#      unsloth/Qwen3.5-<SIZE>-GGUF and renames to the lowercase convention:
+#          bash slurm/download_qwen3.5_ggufs.sh
+#      Run it on a LOGIN node — compute nodes have no outbound internet.
+#      GGUFs are kept in a separate `gguf/` subfolder so they don't
+#      collide with the Ollama blobs already under `models/`.
 #
 #   3. No manual edit of configs/experiments/04_qwen3.5_llamacpp.swap.yaml
 #      is required. The repo copy keeps macOS dev paths so it stays usable
@@ -109,22 +112,20 @@ done
 if [[ "${missing}" -ne 0 ]]; then
     cat >&2 <<EOF
 
-One or more Qwen 3.5 GGUF checkpoints are missing. Download them on a
-login node (compute nodes have no outbound internet) e.g. with:
+One or more Qwen 3.5 GGUF checkpoints are missing in ${GGUF_DIR}.
+Compute nodes have no outbound internet, so the files have to be
+downloaded once from a Mahti LOGIN node:
 
-  module load python-data
-  pip install --user huggingface_hub
-  mkdir -p ${GGUF_DIR}
-  cd ${GGUF_DIR}
-  for tag in 2b 4b 9b 27b; do
-      huggingface-cli download bartowski/Qwen3.5-\${tag}-Instruct-GGUF \\
-          "Qwen3.5-\${tag}-Instruct-Q4_K_M.gguf" \\
-          --local-dir . --local-dir-use-symlinks False
-      # Normalise the filename to the lowercase convention this script expects:
-      mv "Qwen3.5-\${tag}-Instruct-Q4_K_M.gguf" "qwen3.5-\${tag}-instruct-q4_k_m.gguf"
-  done
+  ssh mahti-login11    # or any login node
+  cd ${REPO_DIR}
+  bash slurm/download_qwen3.5_ggufs.sh
 
-(Adjust the source repo if you prefer a different GGUF re-packager.)
+That helper pulls the four Q4_K_M GGUFs from unsloth/Qwen3.5-<SIZE>-GGUF,
+places them in ${GGUF_DIR}, and renames them to the
+qwen3.5-<size>-instruct-q4_k_m.gguf convention this experiment uses.
+
+Once it finishes, re-submit:
+  sbatch slurm/run_experiment_04_llamacpp.sh
 EOF
     exit 1
 fi
