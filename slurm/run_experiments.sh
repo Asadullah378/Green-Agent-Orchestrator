@@ -118,8 +118,12 @@ mkdir -p slurm/logs
 # its blobs and is able to write the SSH key it generates on first start.
 # ---------------------------------------------------------------------------
 echo "Starting Ollama server…"
+# Inside the container we must point OLLAMA_MODELS at the bind-mount target
+# (/root/.ollama), NOT the host scratch path that Apptainer otherwise
+# inherits — the host path is not a valid path inside the container.
 apptainer run --nv \
     --home "${CONTAINER_HOME}:/root" \
+    --env OLLAMA_MODELS=/root/.ollama \
     --bind "${OLLAMA_MODELS}:/root/.ollama" \
     "${OLLAMA_SIF}" serve &
 OLLAMA_PID=$!
@@ -150,6 +154,7 @@ for m in "${MODELS[@]}"; do
     echo "  → ollama pull ${m}"
     apptainer exec --nv \
         --home "${CONTAINER_HOME}:/root" \
+        --env OLLAMA_MODELS=/root/.ollama \
         --bind "${OLLAMA_MODELS}:/root/.ollama" \
         "${OLLAMA_SIF}" ollama pull "${m}"
 done
