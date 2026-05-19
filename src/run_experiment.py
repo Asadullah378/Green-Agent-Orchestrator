@@ -132,6 +132,11 @@ def run_experiment(
 
     results: list[dict] = []
 
+    # Ensure results dir exists before the first CodeCarbon tracker is built —
+    # OfflineEmissionsTracker.__init__ raises OSError if its output_dir is
+    # missing, which would otherwise zero-out every energy measurement.
+    _ensure_results_dir()
+
     try:
         for task in tasks:
             print(f"\n{'=' * 60}")

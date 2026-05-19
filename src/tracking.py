@@ -7,6 +7,7 @@ context manager that returns a structured result dict.
 
 from __future__ import annotations
 
+import os
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -87,30 +88,56 @@ def track_energy(label: str = "task") -> Generator[TrackingResult, None, None]:
     """
     cfg = get_config()
     result = TrackingResult()
-    tracker = OfflineEmissionsTracker(
-        country_iso_code=cfg.energy.country_iso_code,
-        log_level=cfg.energy.log_level,
-        tracking_mode=cfg.energy.tracking_mode,
-        output_dir=cfg.experiment.results_dir,
-        project_name=label,
-        save_to_file=False,
-    )
+    # CodeCarbon's OfflineEmissionsTracker validates `output_dir` eagerly in
+    # __init__ and raises OSError if it doesn't exist — even when
+    # save_to_file=False. Create it on first use so the tracker can start.
+    os.makedirs(cfg.experiment.results_dir, exist_ok=True)
 
-    tracker.start()
+    tracker: OfflineEmissionsTracker | None = None
+    started = False
+    try:
+        tracker = OfflineEmissionsTracker(
+            country_iso_code=cfg.energy.country_iso_code,
+            log_level=cfg.energy.log_level,
+            tracking_mode=cfg.energy.tracking_mode,
+            output_dir=cfg.experiment.results_dir,
+            project_name=label,
+            save_to_file=False,
+        )
+        tracker.start()
+        started = True
+    except Exception as exc:  # noqa: BLE001
+        # Don't let a misbehaving tracker take down the whole experiment;
+        # the run still produces valid accuracy / timing data.
+        print(
+            f"  [tracking] WARNING: CodeCarbon failed to start for "
+            f"'{label}': {exc.__class__.__name__}: {exc}"
+        )
+
     t0 = time.perf_counter()
     try:
         yield result
     finally:
-        emissions = tracker.stop()
         elapsed = time.perf_counter() - t0
-
         result.duration_seconds = round(elapsed, 4)
-        if emissions is not None:
-            result.energy_kwh = tracker.final_emissions_data.energy_consumed or 0.0
-            result.emissions_kg_co2 = emissions
-            result.cpu_energy_kwh = tracker.final_emissions_data.cpu_energy or 0.0
-            result.gpu_energy_kwh = tracker.final_emissions_data.gpu_energy or 0.0
-            result.ram_energy_kwh = tracker.final_emissions_data.ram_energy or 0.0
-            result.cpu_power_w = tracker.final_emissions_data.cpu_power or 0.0
-            result.gpu_power_w = tracker.final_emissions_data.gpu_power or 0.0
-            result.ram_power_w = tracker.final_emissions_data.ram_power or 0.0
+
+        if started and tracker is not None:
+            try:
+                emissions = tracker.stop()
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"  [tracking] WARNING: CodeCarbon stop() failed for "
+                    f"'{label}': {exc.__class__.__name__}: {exc}"
+                )
+                emissions = None
+
+            data = getattr(tracker, "final_emissions_data", None)
+            if emissions is not None and data is not None:
+                result.energy_kwh = data.energy_consumed or 0.0
+                result.emissions_kg_co2 = emissions
+                result.cpu_energy_kwh = data.cpu_energy or 0.0
+                result.gpu_energy_kwh = data.gpu_energy or 0.0
+                result.ram_energy_kwh = data.ram_energy or 0.0
+                result.cpu_power_w = data.cpu_power or 0.0
+                result.gpu_power_w = data.gpu_power or 0.0
+                result.ram_power_w = data.ram_power or 0.0
