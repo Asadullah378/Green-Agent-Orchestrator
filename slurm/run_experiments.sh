@@ -105,9 +105,16 @@ mkdir -p slurm/logs
 
 # ---------------------------------------------------------------------------
 # Start the Ollama server inside Apptainer
+#
+# `HOME=/root` is forced inside the container because Apptainer otherwise
+# inherits HOME=/users/<user> from the host, and that path is not writable
+# inside the read-only container filesystem. With HOME=/root, ollama's
+# default state directory $HOME/.ollama lines up with our bind-mounted
+# model store at /root/.ollama.
 # ---------------------------------------------------------------------------
 echo "Starting Ollama server…"
 apptainer run --nv \
+    --env HOME=/root \
     --bind "${OLLAMA_MODELS}:/root/.ollama" \
     "${OLLAMA_SIF}" serve &
 OLLAMA_PID=$!
@@ -137,6 +144,7 @@ echo "Pulling models for ${EXP_NAME}…"
 for m in "${MODELS[@]}"; do
     echo "  → ollama pull ${m}"
     apptainer exec --nv \
+        --env HOME=/root \
         --bind "${OLLAMA_MODELS}:/root/.ollama" \
         "${OLLAMA_SIF}" ollama pull "${m}"
 done

@@ -107,6 +107,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "Starting llama-swap proxy on :8080…"
 apptainer run --nv \
+    --env HOME=/root \
     --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
     "${LLAMACPP_SIF}" \
     llama-swap \
