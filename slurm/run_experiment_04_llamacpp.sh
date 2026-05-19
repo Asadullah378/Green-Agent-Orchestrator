@@ -222,6 +222,26 @@ if [[ "${GAO_SKIP_LLAMACPP_DIAGNOSTIC:-0}" != "1" ]]; then
     SMALL_GGUF="${GGUF_DIR}/qwen3.5-2b-instruct-q4_k_m.gguf"
     DIAG_LOG="${ARTIFACT_DIR}/llama-server-diagnostic.log"
 
+    # Capture the host's NVIDIA driver version. This is the key piece of
+    # information for diagnosing PTX JIT failures: the llama.cpp image
+    # has to be built against a CUDA toolkit that the host driver can
+    # talk to without forward-compat shims. See slurm/setup_llamacpp_env.sh
+    # for the version-pinning rationale.
+    echo "Host NVIDIA driver / CUDA snapshot:"
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        nvidia-smi --query-gpu=driver_version,name,compute_cap \
+                   --format=csv 2>&1 | head -5
+    else
+        apptainer exec --nv "${LLAMACPP_SIF}" \
+            nvidia-smi --query-gpu=driver_version,name,compute_cap \
+            --format=csv 2>&1 | head -5 || true
+    fi
+    echo
+    echo "llama-server build info (ARCHS line reveals the CUDA toolkit major):"
+    apptainer exec "${APPTAINER_COMMON_FLAGS[@]}" \
+        "${LLAMACPP_SIF}" llama-server --version 2>&1 | head -3 || true
+    echo
+
     echo "Diagnostic: starting llama-server directly with the 2B model on :19999…"
     apptainer exec "${APPTAINER_COMMON_FLAGS[@]}" \
         "${LLAMACPP_SIF}" \

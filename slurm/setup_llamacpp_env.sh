@@ -26,9 +26,14 @@
 #   PROJECT_DIR=/elsewhere
 #   LLAMACPP_SIF=/path/to/llamacpp.sif
 #   LLAMA_SWAP_BIN=/path/to/llama-swap
-#   LLAMACPP_IMAGE=docker://ghcr.io/ggerganov/llama.cpp:server-cuda
-#   LLAMA_SWAP_VERSION=v167          # any GitHub tag from
-#                                     # https://github.com/mostlygeek/llama-swap/releases
+#   LLAMACPP_IMAGE_TAG=server-cuda-b8329   # any ghcr.io/ggml-org/llama.cpp tag.
+#                                          # MUST be a CUDA ≤ 12.6 build to
+#                                          # work with Mahti's host driver —
+#                                          # see the long comment below.
+#   LLAMACPP_IMAGE=docker://ghcr.io/ggml-org/llama.cpp:server-cuda-b8329
+#                                          # full override; supersedes the tag
+#   LLAMA_SWAP_VERSION=v216                # any GitHub tag from
+#                                          # https://github.com/mostlygeek/llama-swap/releases
 # ============================================================================
 
 set -euo pipefail
@@ -37,7 +42,32 @@ PROJECT_DIR="${PROJECT_DIR:-/scratch/project_2013898/ollama_env}"
 LLAMACPP_SIF="${LLAMACPP_SIF:-${PROJECT_DIR}/llamacpp.sif}"
 LLAMA_SWAP_BIN="${LLAMA_SWAP_BIN:-${PROJECT_DIR}/bin/llama-swap}"
 
-LLAMACPP_IMAGE="${LLAMACPP_IMAGE:-docker://ghcr.io/ggml-org/llama.cpp:server-cuda}"
+# -----------------------------------------------------------------------------
+# CUDA-version pinning rationale
+# -----------------------------------------------------------------------------
+# ghcr.io/ggml-org/llama.cpp:server-cuda is a rolling tag. As of April 2026
+# it is built against CUDA 12.8.1 (after a brief 12.9.1 detour, see
+# https://github.com/ggml-org/llama.cpp/pull/21438). Mahti's installed
+# CUDA module top out at 12.6.1, and the host NVIDIA driver does NOT ship
+# the cuda-compat package for forward-compat to 12.8+. Result: any kernel
+# that misses a precompiled SASS for sm_80 falls back to PTX JIT and
+# aborts with "a PTX JIT compilation failed" the first time it runs.
+#
+# We therefore pin to a specific older build that:
+#   * is recent enough to include Qwen 3.5 support (PR #19435/#19468,
+#     merged Feb 9, 2026), and
+#   * still uses CUDA 12.4 (the docker default until ~late March 2026).
+#
+# b8329 (2026-03-13) ships with CUDA 12.4 and works on Mahti.
+# Bump cautiously: every build after roughly b8400 may be on CUDA 12.8/12.9
+# and crash the same way again. Verify with:
+#     apptainer exec llamacpp.sif llama-server --version  (look at ARCHS)
+# A safe build emits ARCHS containing 800 (sm_80, the A100) WITHOUT 1200
+# (sm_120, Blackwell — that requires CUDA 12.8+).
+# -----------------------------------------------------------------------------
+LLAMACPP_IMAGE_TAG="${LLAMACPP_IMAGE_TAG:-server-cuda-b8329}"
+LLAMACPP_IMAGE="${LLAMACPP_IMAGE:-docker://ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG}}"
+
 # Pin to a known-good llama-swap release. Bump as needed — see
 # https://github.com/mostlygeek/llama-swap/releases for the current tag.
 LLAMA_SWAP_VERSION="${LLAMA_SWAP_VERSION:-v216}"
@@ -65,10 +95,34 @@ mkdir -p "${APPTAINER_TMPDIR}" "${APPTAINER_CACHEDIR}"
 # ----------------------------------------------------------------------------
 # Step 1 — pull the llama.cpp CUDA image
 # ----------------------------------------------------------------------------
+# If an old SIF is already present, sanity-check that it isn't the
+# Blackwell/CUDA-12.8+ flavour. Otherwise the diagnostic in
+# slurm/run_experiment_04_llamacpp.sh will abort with a PTX JIT failure.
+_image_uses_blackwell_arch() {
+    local sif="$1"
+    apptainer exec "${sif}" /app/llama-server --version 2>/dev/null \
+        | grep -qE 'ARCHS\s*=\s*[0-9,]*1200\b'
+}
+
 if [[ -f "${LLAMACPP_SIF}" ]]; then
-    echo "✓ ${LLAMACPP_SIF} already exists — skipping pull."
-    ls -lh "${LLAMACPP_SIF}"
-else
+    if _image_uses_blackwell_arch "${LLAMACPP_SIF}"; then
+        cat >&2 <<EOF
+WARNING: ${LLAMACPP_SIF} looks like a CUDA 12.8+/Blackwell build
+         (its ARCHS list contains sm_120). Mahti's NVIDIA driver does
+         not understand CUDA 12.8 PTX, so llama-server will abort
+         during model warmup with:
+           CUDA error: a PTX JIT compilation failed
+
+Removing the stale image and re-pulling ${LLAMACPP_IMAGE_TAG}…
+EOF
+        rm -f "${LLAMACPP_SIF}"
+    else
+        echo "✓ ${LLAMACPP_SIF} already exists — skipping pull."
+        ls -lh "${LLAMACPP_SIF}"
+    fi
+fi
+
+if [[ ! -f "${LLAMACPP_SIF}" ]]; then
     echo "Pulling ${LLAMACPP_IMAGE}"
     echo "      → ${LLAMACPP_SIF}"
     echo "      (this may take a few minutes; ~3–5 GB after extraction)"
