@@ -186,15 +186,22 @@ grep -E "^\s*--model" "${RENDERED_SWAP_CONFIG}" || true
 #
 # IMPORTANT: the ggml-org llama.cpp:server-cuda image installs
 # llama-server at /app/llama-server and exposes it via ENTRYPOINT —
-# `apptainer exec`/`run` bypass ENTRYPOINT, so /app is not on $PATH
-# by default. We add it explicitly so llama-swap's `cmd: llama-server`
-# entries (declared in the rendered swap config) resolve correctly.
+# `apptainer exec`/`run` bypass ENTRYPOINT, so neither /app on $PATH
+# nor /app on $LD_LIBRARY_PATH is set up for us. We add both
+# explicitly so:
+#   * llama-swap's `cmd: llama-server` entries (in the rendered swap
+#     config) resolve to /app/llama-server via PATH lookup;
+#   * the dynamic linker can find libllama-common.so.0 etc, which
+#     live next to the binary in /app.
+# /usr/local/lib is included as a fallback in case a future image
+# version re-locates the .so files.
 # ---------------------------------------------------------------------------
 echo "Starting llama-swap proxy on :8080…"
 apptainer run --nv \
     --home "${CONTAINER_HOME}:/root" \
     --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
     --env "PATH=/app:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    --env "LD_LIBRARY_PATH=/app:/usr/local/lib:/usr/lib/x86_64-linux-gnu" \
     "${LLAMACPP_SIF}" \
     "${LLAMA_SWAP_BIN}" \
         --config "${RENDERED_SWAP_CONFIG}" \

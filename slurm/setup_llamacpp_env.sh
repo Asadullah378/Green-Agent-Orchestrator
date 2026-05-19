@@ -104,7 +104,41 @@ if [[ -z "${LLAMA_SERVER_PATH}" ]]; then
     exit 1
 fi
 echo "✓ llama-server found at ${LLAMA_SERVER_PATH} (inside container)"
-apptainer exec "${LLAMACPP_SIF}" "${LLAMA_SERVER_PATH}" --version 2>&1 | head -3 || true
+
+# Also locate the directory holding llama.cpp's shared libraries
+# (libllama-common.so.0 etc). The image relies on Docker ENTRYPOINT being
+# launched from /app for the dynamic linker's RUNPATH to work; under
+# `apptainer exec` we have to set LD_LIBRARY_PATH explicitly. We probe
+# the common locations and then run the smoke test with the right path.
+echo "Locating llama.cpp shared libraries…"
+LLAMA_LIB_DIR=""
+for candidate in /app /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu; do
+    if apptainer exec "${LLAMACPP_SIF}" \
+            bash -c "ls ${candidate}/libllama-common.so* 2>/dev/null | head -1" \
+            > /dev/null 2>&1; then
+        LLAMA_LIB_DIR="${candidate}"
+        break
+    fi
+done
+if [[ -z "${LLAMA_LIB_DIR}" ]]; then
+    LLAMA_LIB_DIR="$(apptainer exec "${LLAMACPP_SIF}" \
+        find / -maxdepth 5 -name 'libllama-common.so*' 2>/dev/null \
+        | head -1 | xargs -r dirname)"
+fi
+if [[ -z "${LLAMA_LIB_DIR}" ]]; then
+    echo "WARNING: could not locate libllama-common.so inside the image." >&2
+    echo "         Defaulting LD_LIBRARY_PATH to /app for the smoke test." >&2
+    LLAMA_LIB_DIR="/app"
+fi
+echo "✓ llama.cpp libs found in ${LLAMA_LIB_DIR} (inside container)"
+
+apptainer exec \
+    --env "LD_LIBRARY_PATH=${LLAMA_LIB_DIR}" \
+    "${LLAMACPP_SIF}" "${LLAMA_SERVER_PATH}" --version 2>&1 | head -3 || {
+    echo "WARNING: llama-server --version failed even with LD_LIBRARY_PATH=${LLAMA_LIB_DIR}." >&2
+    echo "         The SLURM job may still work (it adds --nv); investigate with:" >&2
+    echo "           apptainer exec --nv --env LD_LIBRARY_PATH=${LLAMA_LIB_DIR} ${LLAMACPP_SIF} ${LLAMA_SERVER_PATH} --version" >&2
+}
 echo
 
 # ----------------------------------------------------------------------------
