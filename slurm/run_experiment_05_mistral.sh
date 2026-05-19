@@ -29,7 +29,14 @@
 #SBATCH --error=slurm/logs/exp05_%j.err
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Under SLURM, ${BASH_SOURCE[0]} resolves to the staged copy in
+# /var/spool/slurmd/job<id>/slurm_script, so we locate the helper
+# relative to $SLURM_SUBMIT_DIR (the dir from which sbatch was run).
+if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+    SCRIPT_DIR="${SLURM_SUBMIT_DIR}/slurm"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 # shellcheck source=_run_experiment_common.sh
 source "${SCRIPT_DIR}/_run_experiment_common.sh"
 

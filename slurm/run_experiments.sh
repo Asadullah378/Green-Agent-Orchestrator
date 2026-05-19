@@ -47,8 +47,16 @@
 
 set -euo pipefail
 
-# Resolve script directory so we can source the helper regardless of CWD
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Under SLURM, ${BASH_SOURCE[0]} points at the staged copy in
+# /var/spool/slurmd/job<id>/slurm_script (not the file in the repo),
+# so we resolve the helper via $SLURM_SUBMIT_DIR (the directory from
+# which `sbatch` was invoked — i.e. the repo root). Fall back to a
+# script-relative lookup for local testing outside SLURM.
+if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+    SCRIPT_DIR="${SLURM_SUBMIT_DIR}/slurm"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 # shellcheck source=_run_experiment_common.sh
 source "${SCRIPT_DIR}/_run_experiment_common.sh"
 
