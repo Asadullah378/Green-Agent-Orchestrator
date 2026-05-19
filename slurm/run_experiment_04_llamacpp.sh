@@ -80,6 +80,10 @@ PROJECT_DIR="/scratch/project_2013898/ollama_env"
 LLAMACPP_SIF="${PROJECT_DIR}/llamacpp.sif"
 REPO_DIR="${PROJECT_DIR}/Green-Agent-Orchestrator"
 GGUF_DIR="${PROJECT_DIR}/gguf/qwen3.5"
+# Writable scratch directory used as in-container HOME (Mahti policy blocks
+# overriding HOME via env, so we use `--home src:dst` instead).
+CONTAINER_HOME="${PROJECT_DIR}/container_home"
+mkdir -p "${CONTAINER_HOME}"
 
 cd "${REPO_DIR}"
 mkdir -p slurm/logs
@@ -107,7 +111,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "Starting llama-swap proxy on :8080…"
 apptainer run --nv \
-    --env HOME=/root \
+    --home "${CONTAINER_HOME}:/root" \
     --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
     "${LLAMACPP_SIF}" \
     llama-swap \

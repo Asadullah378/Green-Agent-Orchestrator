@@ -98,7 +98,11 @@ OLLAMA_SIF="${PROJECT_DIR}/ollama.sif"
 REPO_DIR="${PROJECT_DIR}/Green-Agent-Orchestrator"
 
 export OLLAMA_MODELS="${PROJECT_DIR}/models"
-mkdir -p "${OLLAMA_MODELS}"
+# A scratch-backed directory used as the in-container HOME so ollama can
+# write its SSH key into $HOME/.ollama. Mahti's Apptainer policy blocks
+# APPTAINERENV_HOME, so we use the supported `--home src:dst` flag below.
+CONTAINER_HOME="${PROJECT_DIR}/container_home"
+mkdir -p "${OLLAMA_MODELS}" "${CONTAINER_HOME}"
 
 cd "${REPO_DIR}"
 mkdir -p slurm/logs
@@ -106,15 +110,16 @@ mkdir -p slurm/logs
 # ---------------------------------------------------------------------------
 # Start the Ollama server inside Apptainer
 #
-# `HOME=/root` is forced inside the container because Apptainer otherwise
-# inherits HOME=/users/<user> from the host, and that path is not writable
-# inside the read-only container filesystem. With HOME=/root, ollama's
-# default state directory $HOME/.ollama lines up with our bind-mounted
-# model store at /root/.ollama.
+# `--home CONTAINER_HOME:/root` mounts a writable scratch directory as
+# /root inside the container AND sets HOME=/root, which Mahti's policy
+# allows. Apptainer otherwise inherits HOME=/users/<user> from the host,
+# and that path is not writable inside the container.
+# Then we bind our model store on top of /root/.ollama so ollama finds
+# its blobs and is able to write the SSH key it generates on first start.
 # ---------------------------------------------------------------------------
 echo "Starting Ollama server…"
 apptainer run --nv \
-    --env HOME=/root \
+    --home "${CONTAINER_HOME}:/root" \
     --bind "${OLLAMA_MODELS}:/root/.ollama" \
     "${OLLAMA_SIF}" serve &
 OLLAMA_PID=$!
@@ -144,7 +149,7 @@ echo "Pulling models for ${EXP_NAME}…"
 for m in "${MODELS[@]}"; do
     echo "  → ollama pull ${m}"
     apptainer exec --nv \
-        --env HOME=/root \
+        --home "${CONTAINER_HOME}:/root" \
         --bind "${OLLAMA_MODELS}:/root/.ollama" \
         "${OLLAMA_SIF}" ollama pull "${m}"
 done
