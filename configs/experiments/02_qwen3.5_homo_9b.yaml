@@ -1,11 +1,9 @@
 # ============================================================================
 # Experiment 02 — Qwen 3.5 with a 9B homogeneous baseline
 # ============================================================================
-# Ablation study: shrinks the homogeneous baseline from 27B (exp 01) to 9B
-# while keeping the heterogeneous pool identical. The 9B model is also the
-# largest worker in the hetero pool, so this directly answers the question:
-# "Does decomposition still pay off when the homo baseline is no bigger
-#  than the biggest worker model?"
+# Ablation study: 35B homogeneous baseline (exp 01 uses 122B) while the
+# heterogeneous pool stays identical. Tests whether decomposition still
+# saves energy when the homo model is much larger than any single worker.
 #
 # Run:
 #   python -m src.run_experiment --config configs/experiments/02_qwen3.5_homo_9b.yaml
@@ -18,7 +16,7 @@ experiment:
 
 llm:
   provider: "ollama"
-  request_timeout: 240
+  request_timeout: 360
   temperature: 0.0
   reasoning: false
 
@@ -35,8 +33,8 @@ energy:
   tracking_mode: "process"
 
 homogeneous:
-  model: "qwen3.5:9b"           # ↓ from 27B
-  size_b: 9
+  model: "qwen3.5:35b"
+  size_b: 35
   max_agent_steps: 40
 
 heterogeneous:

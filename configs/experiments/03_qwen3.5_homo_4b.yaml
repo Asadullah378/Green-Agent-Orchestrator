@@ -1,12 +1,8 @@
 # ============================================================================
 # Experiment 03 — Qwen 3.5 with a 4B homogeneous baseline
 # ============================================================================
-# Ablation study: further shrinks the homogeneous baseline to 4B while the
-# heterogeneous pool is unchanged. The baseline is now SMALLER than the
-# largest worker in the hetero pool (9B). Expected outcome: hetero may lose
-# its energy advantage (since some sub-tasks route to 9B) but may keep an
-# accuracy advantage on hard tasks. This is the point at which we expect
-# the cross-over to occur.
+# Ablation study: 27B homogeneous baseline while the heterogeneous pool
+# is unchanged. Mid-size homo vs. the 2B/4B/9B worker pool.
 #
 # Run:
 #   python -m src.run_experiment --config configs/experiments/03_qwen3.5_homo_4b.yaml
@@ -36,8 +32,8 @@ energy:
   tracking_mode: "process"
 
 homogeneous:
-  model: "qwen3.5:4b"           # ↓↓ from 27B
-  size_b: 4
+  model: "qwen3.5:27b"
+  size_b: 27
   max_agent_steps: 40
 
 heterogeneous:

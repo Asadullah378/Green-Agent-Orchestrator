@@ -287,5 +287,5 @@ echo "All set:"
 ls -lh "${LLAMACPP_SIF}" "${LLAMA_SWAP_BIN}"
 echo
 echo "Next steps:"
-echo "  bash slurm/download_qwen3.5_ggufs.sh   # if you haven't already"
-echo "  sbatch slurm/run_experiment_04_llamacpp.sh"
+echo "  bash slurm/download_qwen3.5_ggufs.sh   # 2B/4B/9B/122B GGUFs (122B is ~70 GB)"
+echo "  sbatch slurm/run_experiment_04_llamacpp.sh   # gpumedium, 4× A100"

@@ -1,10 +1,8 @@
 # ============================================================================
 # Experiment 04 — Qwen 3.5 via llama.cpp (instead of Ollama)
 # ============================================================================
-# Same model lineup as experiment 01, but the inference backend is
-# `llama.cpp` (accessed through `llama-swap`, an OpenAI-compatible proxy
-# that hot-swaps the underlying GGUF models on demand). This isolates the
-# effect of the runtime/backend from the model-size effect.
+# Same model lineup as experiment 01 (122B homo, 2B/4B/9B hetero pool), but
+# the inference backend is `llama.cpp` via `llama-swap`.
 #
 # Model aliases below must match the entries in:
 #     configs/experiments/04_qwen3.5_llamacpp.swap.yaml
@@ -15,7 +13,7 @@
 #        qwen3.5-2b-instruct-q4_k_m.gguf
 #        qwen3.5-4b-instruct-q4_k_m.gguf
 #        qwen3.5-9b-instruct-q4_k_m.gguf
-#        qwen3.5-27b-instruct-q4_k_m.gguf
+#        qwen3.5-122b-instruct-q4_k_m.gguf
 #   3. Start the proxy in a separate terminal:
 #        llama-swap --config configs/experiments/04_qwen3.5_llamacpp.swap.yaml --listen :8080
 #   4. Run the experiment:
@@ -29,7 +27,7 @@ experiment:
 
 llm:
   provider: "llamacpp"
-  request_timeout: 300
+  request_timeout: 600
   temperature: 0.0
   reasoning: false
 
@@ -46,8 +44,8 @@ energy:
   tracking_mode: "process"
 
 homogeneous:
-  model: "qwen3.5-27b"            # alias declared in the matching llama-swap config
-  size_b: 27
+  model: "qwen3.5-122b"           # alias declared in the matching llama-swap config
+  size_b: 122
   max_agent_steps: 40
 
 heterogeneous:

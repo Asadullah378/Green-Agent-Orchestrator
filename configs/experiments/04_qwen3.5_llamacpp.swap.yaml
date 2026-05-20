@@ -54,13 +54,14 @@ models:
         --jinja
         --metrics
 
-  qwen3.5-27b:
+  qwen3.5-122b:
     proxy: http://127.0.0.1:${PORT}
     cmd: >
       llama-server
         --port ${PORT}
-        --model /Users/asadullah/models/qwen3.5/qwen3.5-27b-instruct-q4_k_m.gguf
+        --model /Users/asadullah/models/qwen3.5/qwen3.5-122b-instruct-q4_k_m.gguf
         --ctx-size 16384
         --n-gpu-layers 99
+        --tensor-split 25,25,25,25
         --jinja
         --metrics

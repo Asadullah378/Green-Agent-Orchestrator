@@ -22,7 +22,7 @@
 #   run_gao_experiment \
 #       "01_qwen3.5_default" \
 #       "configs/experiments/01_qwen3.5_default.yaml" \
-#       qwen3.5:27b-q4_K_M qwen3.5:9b qwen3.5:4b qwen3.5:2b
+#       qwen3.5:122b qwen3.5:9b qwen3.5:4b qwen3.5:2b
 # ============================================================================
 
 # Apptainer + project layout on Mahti

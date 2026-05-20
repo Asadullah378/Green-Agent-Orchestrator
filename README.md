@@ -205,12 +205,12 @@ never clobber each other and each can be analysed independently.
 
 | # | Config file | Backend | Homogeneous | Heterogeneous workers |
 |---|---|---|---|---|
-| 01 | `configs/experiments/01_qwen3.5_default.yaml` | Ollama    | `qwen3.5:27b-q4_K_M` | Qwen 3.5 (2B / 4B / 9B) |
-| 02 | `configs/experiments/02_qwen3.5_homo_9b.yaml` | Ollama    | `qwen3.5:9b`         | Qwen 3.5 (2B / 4B / 9B) |
-| 03 | `configs/experiments/03_qwen3.5_homo_4b.yaml` | Ollama    | `qwen3.5:4b`         | Qwen 3.5 (2B / 4B / 9B) |
-| 04 | `configs/experiments/04_qwen3.5_llamacpp.yaml` | llama.cpp | `qwen3.5-27b`       | Qwen 3.5 (2B / 4B / 9B) |
-| 05 | `configs/experiments/05_mistral.yaml`         | Ollama    | `mistral-large:latest` (Large 3) | Ministral 3 (3B / 8B / 14B) |
-| 06 | `configs/experiments/06_gemma4.yaml`          | Ollama    | `gemma4:31b`         | Gemma 4 (E2B / E4B / 26B) |
+| 01 | `configs/experiments/01_qwen3.5_default.yaml` | Ollama    | `qwen3.5:122b` | Qwen 3.5 (2B / 4B / 9B) |
+| 02 | `configs/experiments/02_qwen3.5_homo_9b.yaml` | Ollama    | `qwen3.5:35b`  | Qwen 3.5 (2B / 4B / 9B) |
+| 03 | `configs/experiments/03_qwen3.5_homo_4b.yaml` | Ollama    | `qwen3.5:27b`  | Qwen 3.5 (2B / 4B / 9B) |
+| 04 | `configs/experiments/04_qwen3.5_llamacpp.yaml` | llama.cpp | `qwen3.5-122b` | Qwen 3.5 (2B / 4B / 9B) |
+| 05 | `configs/experiments/05_mistral.yaml`         | Ollama    | `mistral-medium-3.5:128b` | Ministral 3 (3B / 8B / 14B) |
+| 06 | `configs/experiments/06_gemma4.yaml`          | Ollama    | `gemma3:27b`   | Gemma 3 (270M / 1B / 4B) |
 
 Each experiment runs 7 repetitions per (task, flow) — 15 tasks × 2 flows ×
 7 runs = 210 records per experiment.

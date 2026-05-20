@@ -2,9 +2,9 @@
 # ============================================================================
 # One-time helper: download Qwen 3.5 GGUF checkpoints for experiment 04
 # ============================================================================
-# Compute nodes on Mahti have no outbound internet, so the four GGUFs
-# required by `run_experiment_04_llamacpp.sh` have to land on disk before
-# you submit the SLURM job. Run this script ONCE on a Mahti login node.
+# Compute nodes on Mahti have no outbound internet, so the GGUFs required
+# by `run_experiment_04_llamacpp.sh` have to land on disk before you
+# submit the SLURM job. Run this script ONCE on a Mahti login node.
 #
 # Usage:
 #   bash slurm/download_qwen3.5_ggufs.sh
@@ -13,6 +13,7 @@
 #   GGUF_DIR=/somewhere/else bash slurm/download_qwen3.5_ggufs.sh
 #   HF_REPO_PREFIX=bartowski/Qwen_Qwen3.5- HF_REPO_SUFFIX=-GGUF \
 #       bash slurm/download_qwen3.5_ggufs.sh
+#   GAO_GGUF_SIZES="2b 4b 9b 122b" bash slurm/download_qwen3.5_ggufs.sh
 #
 # Existing files are skipped, so re-running is cheap.
 #
@@ -39,10 +40,13 @@ GGUF_DIR="${GGUF_DIR:-/scratch/project_2013898/ollama_env/gguf/qwen3.5}"
 HF_REPO_PREFIX="${HF_REPO_PREFIX:-unsloth/Qwen3.5-}"
 HF_REPO_SUFFIX="${HF_REPO_SUFFIX:--GGUF}"
 QUANT="${QUANT:-Q4_K_M}"
+# Sizes needed for experiment 04 (hetero pool + 122B homo baseline).
+GAO_GGUF_SIZES="${GAO_GGUF_SIZES:-2b 4b 9b 122b}"
 
 echo "Target directory : ${GGUF_DIR}"
 echo "HF repo template : ${HF_REPO_PREFIX}<SIZE>${HF_REPO_SUFFIX}"
 echo "Quantisation     : ${QUANT}"
+echo "Sizes to fetch   : ${GAO_GGUF_SIZES}"
 echo
 
 mkdir -p "${GGUF_DIR}"
@@ -58,8 +62,6 @@ fi
 if ! python -c "import huggingface_hub" 2>/dev/null; then
     echo "huggingface_hub not importable — installing into your user site-packages…"
     python -m pip install --user --quiet huggingface_hub
-    # Re-check; if still broken we want to fail loudly here, not deep
-    # inside the per-file loop below.
     python -c "import huggingface_hub" || {
         echo "ERROR: huggingface_hub still not importable after pip install." >&2
         exit 1
@@ -69,12 +71,18 @@ echo "Using python : $(command -v python)"
 python -c "import huggingface_hub, sys; print(f'huggingface_hub : {huggingface_hub.__version__}')"
 echo
 
-for lower in 2b 4b 9b 27b; do
+for lower in ${GAO_GGUF_SIZES}; do
     case "${lower}" in
-        2b)  upper="2B"  ;;
-        4b)  upper="4B"  ;;
-        9b)  upper="9B"  ;;
-        27b) upper="27B" ;;
+        2b)   upper="2B"   ;;
+        4b)   upper="4B"   ;;
+        9b)   upper="9B"   ;;
+        27b)  upper="27B"  ;;
+        35b)  upper="35B"  ;;
+        122b) upper="122B" ;;
+        *)
+            echo "ERROR: unknown size '${lower}' in GAO_GGUF_SIZES" >&2
+            exit 1
+            ;;
     esac
     target="${GGUF_DIR}/qwen3.5-${lower}-instruct-q4_k_m.gguf"
     src_file="Qwen3.5-${upper}-${QUANT}.gguf"
@@ -86,10 +94,6 @@ for lower in 2b 4b 9b 27b; do
     fi
 
     echo "↓ ${src_repo}  →  ${src_file}"
-    # Call the huggingface_hub library directly (bypasses the broken
-    # ~/.local/bin/huggingface-cli wrapper that pip generated under
-    # Tykky). hf_hub_download writes the file into local_dir with its
-    # original name; we rename to the lowercase convention below.
     python - <<PY
 from huggingface_hub import hf_hub_download
 path = hf_hub_download(
@@ -109,8 +113,8 @@ PY
 done
 
 echo
-echo "All four GGUFs are present in ${GGUF_DIR}:"
-ls -lh "${GGUF_DIR}"/qwen3.5-*-instruct-q4_k_m.gguf
+echo "GGUFs in ${GGUF_DIR}:"
+ls -lh "${GGUF_DIR}"/qwen3.5-*-instruct-q4_k_m.gguf 2>/dev/null || true
 echo
 echo "You can now submit the experiment:"
 echo "  sbatch slurm/run_experiment_04_llamacpp.sh"

@@ -20,11 +20,10 @@
 #      is run from the host (it is visible inside the container via the
 #      ${PROJECT_DIR} bind mount), so it does not need to live in the SIF.
 #
-#   2. Download the four Qwen 3.5 GGUF checkpoints into
+#   2. Download the Qwen 3.5 GGUF checkpoints (2B/4B/9B/122B) into
 #      ${PROJECT_DIR}/gguf/qwen3.5/:
 #          bash slurm/download_qwen3.5_ggufs.sh
-#      The helper pulls from unsloth/Qwen3.5-<SIZE>-GGUF and renames the
-#      files to the qwen3.5-<size>-instruct-q4_k_m.gguf convention.
+#      The 122B file is large (~70 GB); allow time on the login node.
 #      Kept in a separate `gguf/` subfolder so they don't collide with
 #      the Ollama blobs already under `models/`.
 #
@@ -40,13 +39,12 @@
 
 #SBATCH --job-name=gao-exp04-llamacpp
 #SBATCH --account=project_2013898
-#SBATCH --partition=gpusmall
-#SBATCH --time=12:00:00
+#SBATCH --partition=gpumedium
+#SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:a100:1
-#SBATCH --mem=80G
+#SBATCH --cpus-per-task=128
+#SBATCH --gres=gpu:a100:4
 #SBATCH --output=slurm/logs/exp04_%j.out
 #SBATCH --error=slurm/logs/exp04_%j.err
 
@@ -93,7 +91,7 @@ REQUIRED_GGUFS=(
     qwen3.5-2b-instruct-q4_k_m.gguf
     qwen3.5-4b-instruct-q4_k_m.gguf
     qwen3.5-9b-instruct-q4_k_m.gguf
-    qwen3.5-27b-instruct-q4_k_m.gguf
+    qwen3.5-122b-instruct-q4_k_m.gguf
 )
 
 # Sanity-check that the GGUF files and image are actually present, since
@@ -117,9 +115,8 @@ downloaded once from a Mahti LOGIN node:
   cd ${REPO_DIR}
   bash slurm/download_qwen3.5_ggufs.sh
 
-That helper pulls the four Q4_K_M GGUFs from unsloth/Qwen3.5-<SIZE>-GGUF,
-places them in ${GGUF_DIR}, and renames them to the
-qwen3.5-<size>-instruct-q4_k_m.gguf convention this experiment uses.
+That helper pulls the Q4_K_M GGUFs (2B, 4B, 9B, 122B) from
+unsloth/Qwen3.5-<SIZE>-GGUF into ${GGUF_DIR}.
 
 Once it finishes, re-submit:
   sbatch slurm/run_experiment_04_llamacpp.sh

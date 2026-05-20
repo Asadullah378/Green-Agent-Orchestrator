@@ -1,7 +1,7 @@
 # ============================================================================
 # Experiment 01 — Qwen 3.5 default (paper baseline)
 # ============================================================================
-# Homogeneous baseline: a single 27B model (qwen3.5:27b-q4_K_M).
+# Homogeneous baseline: Qwen 3.5 122B (large single-model baseline).
 # Heterogeneous pool: 2B / 4B / 9B Qwen 3.5 workers, 4B orchestrator, 2B synth.
 #
 # This is the exact configuration used for the headline results in the paper.
@@ -19,7 +19,7 @@ experiment:
 
 llm:
   provider: "ollama"
-  request_timeout: 240
+  request_timeout: 600
   temperature: 0.0
   reasoning: false
 
@@ -36,8 +36,8 @@ energy:
   tracking_mode: "process"
 
 homogeneous:
-  model: "qwen3.5:27b-q4_K_M"
-  size_b: 27
+  model: "qwen3.5:122b"
+  size_b: 122
   max_agent_steps: 40
 
 heterogeneous:

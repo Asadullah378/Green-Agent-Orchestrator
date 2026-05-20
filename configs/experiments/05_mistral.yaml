@@ -2,18 +2,18 @@
 # Experiment 05 — Mistral 2026 lineup
 # ============================================================================
 # Cross-architecture replication using the 2026 Mistral family:
-#   - Mistral Small 3 (24B) as the homogeneous baseline
+#   - Mistral Medium 3.5 (128B) as the homogeneous baseline
 #   - Ministral 3 / 8 / 14 (edge models) as the heterogeneous worker pool
 #
 # Pull the models before running:
-#   ollama pull mistral-small:24b
+#   ollama pull mistral-medium-3.5:128b
 #   ollama pull ministral-3:3b
 #   ollama pull ministral-3:8b
 #   ollama pull ministral-3:14b
 #
 # NOTE: On Ollama Hub the Ministral family is published under the
-# `ministral-3` namespace (NOT `ministral`). All four models fit
-# comfortably on a single A100-40GB at Q4_K_M.
+# `ministral-3` namespace (NOT `ministral`). The 128B homo model needs
+# Mahti gpumedium (4× A100 per job).
 #
 # Run:
 #   python -m src.run_experiment --config configs/experiments/05_mistral.yaml
@@ -26,7 +26,7 @@ experiment:
 
 llm:
   provider: "ollama"
-  request_timeout: 300
+  request_timeout: 600
   temperature: 0.0
   reasoning: false
 
@@ -43,8 +43,8 @@ energy:
   tracking_mode: "process"
 
 homogeneous:
-  model: "mistral-small:24b"        # Mistral Small 3
-  size_b: 24
+  model: "mistral-medium-3.5:128b"
+  size_b: 128
   max_agent_steps: 40
 
 heterogeneous:

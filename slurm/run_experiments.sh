@@ -22,20 +22,19 @@
 #   sbatch slurm/run_experiment_01_qwen3.5_default.sh
 #   sbatch slurm/run_experiment_02_qwen3.5_homo_9b.sh
 #   sbatch slurm/run_experiment_03_qwen3.5_homo_4b.sh
-#   sbatch slurm/run_experiment_05_mistral.sh        # 2x A100 (large model)
+#   sbatch slurm/run_experiment_05_mistral.sh        # gpumedium, 4× A100
 #   sbatch slurm/run_experiment_06_gemma4.sh
 #
 # ============================================================================
 
 #SBATCH --job-name=gao-experiments
 #SBATCH --account=project_2013898
-#SBATCH --partition=gpusmall
-#SBATCH --time=12:00:00
+#SBATCH --partition=gpumedium
+#SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:a100:1
-#SBATCH --mem=80G
+#SBATCH --cpus-per-task=128
+#SBATCH --gres=gpu:a100:4
 #SBATCH --array=1,2,3,5,6
 #SBATCH --output=slurm/logs/exp%a_%A.out
 #SBATCH --error=slurm/logs/exp%a_%A.err
@@ -63,31 +62,31 @@ case "${SLURM_ARRAY_TASK_ID:-1}" in
     run_gao_experiment \
         "01_qwen3.5_default" \
         "configs/experiments/01_qwen3.5_default.yaml" \
-        qwen3.5:27b-q4_K_M qwen3.5:9b qwen3.5:4b qwen3.5:2b
+        qwen3.5:122b qwen3.5:9b qwen3.5:4b qwen3.5:2b
     ;;
   2)
     run_gao_experiment \
         "02_qwen3.5_homo_9b" \
         "configs/experiments/02_qwen3.5_homo_9b.yaml" \
-        qwen3.5:9b qwen3.5:4b qwen3.5:2b
+        qwen3.5:35b qwen3.5:9b qwen3.5:4b qwen3.5:2b
     ;;
   3)
     run_gao_experiment \
         "03_qwen3.5_homo_4b" \
         "configs/experiments/03_qwen3.5_homo_4b.yaml" \
-        qwen3.5:9b qwen3.5:4b qwen3.5:2b
+        qwen3.5:27b qwen3.5:9b qwen3.5:4b qwen3.5:2b
     ;;
   5)
     run_gao_experiment \
         "05_mistral" \
         "configs/experiments/05_mistral.yaml" \
-        mistral-small:24b ministral-3:14b ministral-3:8b ministral-3:3b
+        mistral-medium-3.5:128b ministral-3:14b ministral-3:8b ministral-3:3b
     ;;
   6)
     run_gao_experiment \
         "06_gemma4" \
         "configs/experiments/06_gemma4.yaml" \
-        gemma4:31b gemma4:26b gemma4:e4b gemma4:e2b
+        gemma3:27b gemma3:4b gemma3:1b gemma3:270m
     ;;
   *)
     echo "Unknown SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-} (expected 1,2,3,5,6)" >&2

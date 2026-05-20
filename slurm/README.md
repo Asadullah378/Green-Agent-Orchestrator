@@ -98,8 +98,8 @@ Required steps if you are starting from a fresh project directory:
    #    llama-swap Go binary into ${PROJECT_DIR}.
    bash slurm/setup_llamacpp_env.sh
 
-   # b) Download the four Q4_K_M Qwen 3.5 GGUFs into
-   #    ${PROJECT_DIR}/gguf/qwen3.5/.
+   # b) Download Q4_K_M Qwen 3.5 GGUFs (2B/4B/9B/122B) into
+   #    ${PROJECT_DIR}/gguf/qwen3.5/. The 122B file is ~70 GB.
    bash slurm/download_qwen3.5_ggufs.sh
    ```
 
@@ -113,29 +113,48 @@ Required steps if you are starting from a fresh project directory:
 
 ## Resource sizing notes
 
-All scripts target the `gpusmall` partition (1–2 A100-40GB, up to 36 h
-of wall time). `gpumedium` cannot be used because Mahti requires it to
-be claimed at full 4-GPU width.
+All scripts use the **`gpumedium`** partition. Mahti requires **four A100
+GPUs per job** on that partition (`--gres=gpu:a100:4`); see the [Mahti GPU
+batch jobs
+guide](https://docs.csc.fi/computing/running/creating-job-scripts-mahti/#gpu-batch-jobs).
 
-| Experiment | Largest model loaded | Approx GPU memory | Notes |
+Standard directives (every experiment):
+
+```bash
+#SBATCH --partition=gpumedium
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=128    # full CPU on the GPU node
+#SBATCH --gres=gpu:a100:4
+```
+
+Main memory is allocated automatically (~122.5 GiB per GPU, ~490 GiB for
+four GPUs). We omit `--mem` so SLURM applies the default.
+
+| Experiment | Homo model | Wall time | Notes |
 |---|---|---|---|
-| 01 | qwen3.5:27b q4 | ~17 GB | Comfortably fits on one A100. |
-| 02 | qwen3.5:9b | ~7 GB | |
-| 03 | qwen3.5:9b (worker) | ~7 GB | Hetero pool still includes 9B. |
-| 04 | qwen3.5-27b GGUF q4 | ~17 GB | Same as exp 01, but via llama.cpp. |
-| 05 | mistral-small:24b | ~14 GB | Fits on one A100. |
-| 06 | gemma4:31b | ~20 GB | Fits on one A100. |
+| 01 | qwen3.5:122b | 24 h | Ollama tensor-parallel across 4 GPUs. |
+| 02 | qwen3.5:35b | 12 h | |
+| 03 | qwen3.5:27b | 12 h | |
+| 04 | qwen3.5-122b GGUF | 24 h | llama.cpp; `--tensor-split 25,25,25,25`. |
+| 05 | mistral-medium-3.5:128b | 24 h | |
+| 06 | gemma3:27b | 12 h | Hetero pool: 270m / 1b / 4b. |
+
+Optional: add fast local NVMe for heavy I/O, e.g.
+`--gres=gpu:a100:4,nvme:950` (see Mahti docs).
 
 ## Ollama model names
 
-A couple of Ollama Hub names that have caught us out — use these exact
-tags when adding new experiments:
+Use these exact tags when pulling on Mahti:
 
-| Family | Wrong name | Correct Ollama tag |
+| Family | Model | Ollama tag |
 |---|---|---|
-| Ministral (3B / 8B / 14B) | `ministral:3b` | `ministral-3:3b` |
-| Mistral Small 3 (24B) | — | `mistral-small:24b` |
-| Gemma 4 edge models | `gemma4:e2b` | (correct, kept as-is) |
+| Qwen 3.5 homo (exp 01) | 122B | `qwen3.5:122b` |
+| Qwen 3.5 homo (exp 02) | 35B | `qwen3.5:35b` |
+| Qwen 3.5 homo (exp 03) | 27B | `qwen3.5:27b` |
+| Ministral 3 | 3B / 8B / 14B | `ministral-3:3b`, `:8b`, `:14b` |
+| Mistral Medium 3.5 (exp 05) | 128B | `mistral-medium-3.5:128b` |
+| Gemma 3 (exp 06) | 270M / 1B / 4B / 27B | `gemma3:270m`, `:1b`, `:4b`, `:27b` |
 
 ## Re-running just the analysis
 
