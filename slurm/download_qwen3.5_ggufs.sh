@@ -143,10 +143,19 @@ PY
             TMP_EXTRACT="$(mktemp -d)"
             curl -fsSL "https://github.com/ggml-org/llama.cpp/releases/download/b8329/llama-b8329-bin-ubuntu-x64.tar.gz" -o "${TMP_EXTRACT}/llama-bin.tar.gz"
             tar -xzf "${TMP_EXTRACT}/llama-bin.tar.gz" -C "${TMP_EXTRACT}"
-            chmod +x "${TMP_EXTRACT}/build/bin/llama-gguf-split"
+            
+            # Find the extracted binary since the directory structure in the tarball might differ
+            BIN_PATH="$(find "${TMP_EXTRACT}" -type f -name llama-gguf-split | head -n 1)"
+            
+            if [[ -z "${BIN_PATH}" ]]; then
+                echo "ERROR: Failed to extract or find llama-gguf-split inside the downloaded archive." >&2
+                exit 1
+            fi
+            
+            chmod +x "${BIN_PATH}"
 
             echo "  Merging split GGUF files (this may take a few minutes for 70GB)..."
-            "${TMP_EXTRACT}/build/bin/llama-gguf-split" --merge "${PART1}" "${target}"
+            "${BIN_PATH}" --merge "${PART1}" "${target}"
             
             if [[ -f "${target}" ]]; then
                 echo "  Cleaning up split parts and temporary binaries..."
