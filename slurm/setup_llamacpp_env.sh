@@ -177,13 +177,23 @@ cd "${LLAMA_CPP_SRC}"
 
 echo "Compiling with CMake (GGML_CUDA=ON, targeting sm_80 for A100)..."
 rm -rf build
+
+# Fix for "error while loading shared libraries: libcuda.so.1" when
+# building the UI assets using llama-ui-embed during compilation on login node.
+# We create a fake libcuda.so.1 pointing to the stubs.
+STUB_DIR="/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/targets/x86_64-linux/lib/stubs"
+export STUB_HACK="${PROJECT_DIR}/cuda_stubs_hack"
+mkdir -p "${STUB_HACK}"
+ln -sf "${STUB_DIR}/libcuda.so" "${STUB_HACK}/libcuda.so.1"
+export LD_LIBRARY_PATH="${STUB_HACK}:${STUB_DIR}:${LD_LIBRARY_PATH:-}"
+
 # Provide explicit stubs path via CMAKE_EXE_LINKER_FLAGS so the linker can find libcuda.so
 cmake -B build \
     -DGGML_CUDA=ON \
     -DCMAKE_CUDA_ARCHITECTURES="80" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_EXE_LINKER_FLAGS="-L/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/targets/x86_64-linux/lib/stubs -lcuda" \
-    -DCMAKE_SHARED_LINKER_FLAGS="-L/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/targets/x86_64-linux/lib/stubs -lcuda"
+    -DCMAKE_EXE_LINKER_FLAGS="-L${STUB_DIR} -lcuda" \
+    -DCMAKE_SHARED_LINKER_FLAGS="-L${STUB_DIR} -lcuda"
 
 cmake --build build --config Release -j 8 --target llama-server
 
