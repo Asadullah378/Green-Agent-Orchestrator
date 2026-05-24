@@ -239,18 +239,21 @@ if [[ "${GAO_SKIP_LLAMACPP_DIAGNOSTIC:-0}" != "1" ]]; then
         "${LLAMACPP_SIF}" llama-server --version 2>&1 | head -3 || true
     echo
 
-    echo "Diagnostic: starting llama-server directly with the 2B model on :19999…"
-    apptainer exec "${APPTAINER_COMMON_FLAGS[@]}" \
-        "${LLAMACPP_SIF}" \
-        llama-server \
-            --model "${SMALL_GGUF}" \
-            --port 19999 \
-            --host 127.0.0.1 \
-            --ctx-size 1024 \
-            --n-gpu-layers 99 \
-            --jinja \
-            --metrics \
-            > "${DIAG_LOG}" 2>&1 &
+    echo "Diagnostic: starting native llama-server directly with the 2B model on :19999…"
+    
+    # We will use the natively compiled binary instead of Apptainer, because 
+    # it was compiled specifically with Mahti's CUDA 12.6.1 and gcc modules.
+    module load gcc/10.4.0 cuda/12.6.1 >/dev/null 2>&1 || true
+    
+    "${PROJECT_DIR}/bin/llama-server-native" \
+        --model "${SMALL_GGUF}" \
+        --port 19999 \
+        --host 127.0.0.1 \
+        --ctx-size 1024 \
+        --n-gpu-layers 99 \
+        --jinja \
+        --metrics \
+        > "${DIAG_LOG}" 2>&1 &
     DIAG_PID=$!
 
     diag_ok=0
@@ -315,19 +318,24 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-# Start llama-swap inside Apptainer. llama-swap itself is a small
-# statically-linked Go binary that lives on the HOST under
-# ${LLAMA_SWAP_BIN}; it is visible inside the container at the same
-# path via the ${PROJECT_DIR} bind mount, so we just invoke it by its
-# absolute host path. The `llama-server` subprocesses it spawns are
-# the ones baked into ${LLAMACPP_SIF} (with CUDA support).
+# Start llama-swap. llama-swap itself is a small statically-linked Go binary
+# that lives on the HOST under ${LLAMA_SWAP_BIN}. The `llama-server` subprocesses
+# it spawns are the natively compiled ones under ${PROJECT_DIR}/bin/llama-server-native.
+#
+# Because we are using the native binary, we do not use Apptainer anymore.
+# We just need to ensure the correct modules are loaded.
 # ---------------------------------------------------------------------------
+module load gcc/10.4.0 cuda/12.6.1 >/dev/null 2>&1 || true
+
+# Update the rendered swap config to point to the native binary
+sed -E -i \
+    -e "s#cmd: >\s*llama-server#cmd: >\n      ${PROJECT_DIR}/bin/llama-server-native#g" \
+    "${RENDERED_SWAP_CONFIG}"
+
 echo "Starting llama-swap proxy on :8080…"
-apptainer exec "${APPTAINER_COMMON_FLAGS[@]}" \
-    "${LLAMACPP_SIF}" \
-    "${LLAMA_SWAP_BIN}" \
-        --config "${RENDERED_SWAP_CONFIG}" \
-        --listen :8080 &
+"${LLAMA_SWAP_BIN}" \
+    --config "${RENDERED_SWAP_CONFIG}" \
+    --listen :8080 &
 SWAP_PID=$!
 
 cleanup() {

@@ -52,10 +52,11 @@ LLAMA_SWAP_BIN="${LLAMA_SWAP_BIN:-${PROJECT_DIR}/bin/llama-swap}"
 #
 # Because Docker image tags from the registry frequently get pruned or
 # renamed, we cannot reliably pin a specific `bXXXX` tag from GHCR.
-# Instead, we pull the official `server-cuda` image. If the driver fails
-# with a PTX JIT compilation error, the user will be alerted.
+# Instead, we will pull the `server` image (CPU only) to use its
+# internal tools like `llama-gguf-split`, but build the actual `llama-server`
+# binary natively from source on the Mahti host using the `cuda/12.6.1` module.
 # -----------------------------------------------------------------------------
-LLAMACPP_IMAGE_TAG="${LLAMACPP_IMAGE_TAG:-server-cuda}"
+LLAMACPP_IMAGE_TAG="${LLAMACPP_IMAGE_TAG:-server}"
 LLAMACPP_IMAGE="${LLAMACPP_IMAGE:-docker://ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG}}"
 
 # Pin to a known-good llama-swap release. Bump as needed — see
@@ -123,68 +124,77 @@ if [[ ! -f "${LLAMACPP_SIF}" ]]; then
 fi
 echo
 
-# Quick smoke test: find `llama-server` inside the image. The ggml-org
-# server-cuda image installs it at /app/llama-server and uses it as the
-# ENTRYPOINT, so `apptainer exec` (which bypasses ENTRYPOINT) doesn't see
-# it on $PATH. We try the known location first, then fall back to a
-# filesystem search so we have a hope of discovering future re-locations.
-echo "Locating llama-server inside the image…"
-LLAMA_SERVER_PATH=""
-for candidate in "${LLAMA_SERVER_DIR_DEFAULT}/llama-server" \
-                  /usr/local/bin/llama-server \
-                  /usr/bin/llama-server; do
-    if apptainer exec "${LLAMACPP_SIF}" test -x "${candidate}" 2>/dev/null; then
-        LLAMA_SERVER_PATH="${candidate}"
-        break
+    echo "Locating llama-server inside the image…"
+    LLAMA_SERVER_PATH=""
+    for candidate in "${LLAMA_SERVER_DIR_DEFAULT}/llama-server" \
+                      /usr/local/bin/llama-server \
+                      /usr/bin/llama-server; do
+        if apptainer exec "${LLAMACPP_SIF}" test -x "${candidate}" 2>/dev/null; then
+            LLAMA_SERVER_PATH="${candidate}"
+            break
+        fi
+    done
+    if [[ -z "${LLAMA_SERVER_PATH}" ]]; then
+        LLAMA_SERVER_PATH="$(apptainer exec "${LLAMACPP_SIF}" \
+            find / -maxdepth 5 -type f -name llama-server 2>/dev/null | head -1)"
     fi
-done
-if [[ -z "${LLAMA_SERVER_PATH}" ]]; then
-    LLAMA_SERVER_PATH="$(apptainer exec "${LLAMACPP_SIF}" \
-        find / -maxdepth 5 -type f -name llama-server 2>/dev/null | head -1)"
+
+    if [[ -z "${LLAMA_SERVER_PATH}" ]]; then
+        echo "ERROR: could not locate a llama-server binary inside ${LLAMACPP_SIF}." >&2
+        exit 1
+    fi
+    echo "✓ llama-server found at ${LLAMA_SERVER_PATH} (inside container)"
+fi
+echo
+
+echo "============================================================================"
+echo "Compiling native llama-server on Mahti host"
+echo "============================================================================"
+echo "Since the pre-built Docker containers are compiled for CUDA 12.8+, which"
+echo "Mahti's NVIDIA driver does not support (resulting in PTX JIT errors), we"
+echo "will quickly compile a native version of llama-server using Mahti's own"
+echo "CUDA 12.6.1 toolkit. This guarantees perfect hardware compatibility."
+echo
+
+# Source the bash profile so the module command works correctly inside scripts
+source /etc/profile.d/modules.sh || true
+module load gcc/11.3.0 cmake/3.27.7 cuda/12.6.1 >/dev/null 2>&1 || true
+
+if ! command -v nvcc >/dev/null 2>&1; then
+    echo "ERROR: nvcc not found. Trying alternative modules..."
+    module load gcc/10.4.0 cuda/12.6.1 >/dev/null 2>&1 || true
+    if ! command -v nvcc >/dev/null 2>&1; then
+        echo "ERROR: nvcc still not found. Please ensure you are on a Mahti login node."
+        exit 1
+    fi
 fi
 
-if [[ -z "${LLAMA_SERVER_PATH}" ]]; then
-    echo "ERROR: could not locate a llama-server binary inside ${LLAMACPP_SIF}." >&2
-    echo "       The image may have changed its layout — please inspect with:" >&2
-    echo "         apptainer exec ${LLAMACPP_SIF} ls -l /app /usr/local/bin /usr/bin" >&2
+LLAMA_CPP_SRC="${PROJECT_DIR}/llama.cpp-src"
+if [[ ! -d "${LLAMA_CPP_SRC}" ]]; then
+    echo "Cloning llama.cpp repository..."
+    git clone https://github.com/ggml-org/llama.cpp.git "${LLAMA_CPP_SRC}"
+else
+    echo "Updating existing llama.cpp repository..."
+    cd "${LLAMA_CPP_SRC}" && git fetch && git reset --hard origin/master
+fi
+
+cd "${LLAMA_CPP_SRC}"
+
+echo "Compiling with CMake (GGML_CUDA=ON, targeting sm_80 for A100)..."
+rm -rf build
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="80" -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release -j 8 --target llama-server
+
+if [[ ! -f "build/bin/llama-server" ]]; then
+    echo "ERROR: Native compilation failed!" >&2
     exit 1
 fi
-echo "✓ llama-server found at ${LLAMA_SERVER_PATH} (inside container)"
 
-# Also locate the directory holding llama.cpp's shared libraries
-# (libllama-common.so.0 etc). The image relies on Docker ENTRYPOINT being
-# launched from /app for the dynamic linker's RUNPATH to work; under
-# `apptainer exec` we have to set LD_LIBRARY_PATH explicitly. We probe
-# the common locations and then run the smoke test with the right path.
-echo "Locating llama.cpp shared libraries…"
-LLAMA_LIB_DIR=""
-for candidate in /app /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu; do
-    if apptainer exec "${LLAMACPP_SIF}" \
-            bash -c "ls ${candidate}/libllama-common.so* 2>/dev/null | head -1" \
-            > /dev/null 2>&1; then
-        LLAMA_LIB_DIR="${candidate}"
-        break
-    fi
-done
-if [[ -z "${LLAMA_LIB_DIR}" ]]; then
-    LLAMA_LIB_DIR="$(apptainer exec "${LLAMACPP_SIF}" \
-        find / -maxdepth 5 -name 'libllama-common.so*' 2>/dev/null \
-        | head -1 | xargs -r dirname)"
-fi
-if [[ -z "${LLAMA_LIB_DIR}" ]]; then
-    echo "WARNING: could not locate libllama-common.so inside the image." >&2
-    echo "         Defaulting LD_LIBRARY_PATH to /app for the smoke test." >&2
-    LLAMA_LIB_DIR="/app"
-fi
-echo "✓ llama.cpp libs found in ${LLAMA_LIB_DIR} (inside container)"
+echo "✓ Successfully compiled native llama-server."
+cp "build/bin/llama-server" "${PROJECT_DIR}/bin/llama-server-native"
+chmod +x "${PROJECT_DIR}/bin/llama-server-native"
+echo "✓ Installed at ${PROJECT_DIR}/bin/llama-server-native"
 
-apptainer exec \
-    --env "LD_LIBRARY_PATH=${LLAMA_LIB_DIR}" \
-    "${LLAMACPP_SIF}" "${LLAMA_SERVER_PATH}" --version 2>&1 | head -3 || {
-    echo "WARNING: llama-server --version failed even with LD_LIBRARY_PATH=${LLAMA_LIB_DIR}." >&2
-    echo "         The SLURM job may still work (it adds --nv); investigate with:" >&2
-    echo "           apptainer exec --nv --env LD_LIBRARY_PATH=${LLAMA_LIB_DIR} ${LLAMACPP_SIF} ${LLAMA_SERVER_PATH} --version" >&2
-}
 echo
 
 # ----------------------------------------------------------------------------
