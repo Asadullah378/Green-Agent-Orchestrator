@@ -116,7 +116,6 @@ for lower in ${GAO_GGUF_SIZES}; do
         # The 122B model is split into 3 parts in the Q4_K_M folder
         python - <<PY
 from huggingface_hub import hf_hub_download
-import os
 
 parts = [
     "Q4_K_M/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf",
@@ -124,47 +123,36 @@ parts = [
     "Q4_K_M/Qwen3.5-122B-A10B-Q4_K_M-00003-of-00003.gguf"
 ]
 
-downloaded_paths = []
 for p in parts:
     print(f"  Downloading {p}...")
-    path = hf_hub_download(
+    hf_hub_download(
         repo_id="${src_repo}",
         filename=p,
         local_dir="${GGUF_DIR}",
         local_dir_use_symlinks=False,
     )
-    downloaded_paths.append(path)
 
-print("  All parts downloaded. Proceeding to concatenate with llama-gguf-split...")
+print("  All parts downloaded. Proceeding to concatenate...")
 PY
-        # The parts are downloaded to e.g. GGUF_DIR/Q4_K_M/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf
-        # We need to run llama-gguf-split --merge to combine them into the target file.
-        # We can use the llama.cpp Apptainer image to do this!
         
         PART1="${GGUF_DIR}/Q4_K_M/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf"
         if [[ -f "${PART1}" ]]; then
-            echo "  Merging split GGUF files..."
+            echo "  Downloading standalone llama-gguf-split binary..."
+            curl -fsSL "https://github.com/ggml-org/llama.cpp/releases/download/b8329/llama-b8329-bin-ubuntu-x64.tar.gz" -o /tmp/llama-bin.tar.gz
+            tar -xzf /tmp/llama-bin.tar.gz -C /tmp
+            chmod +x /tmp/build/bin/llama-gguf-split
+
+            echo "  Merging split GGUF files (this may take a few minutes for 70GB)..."
+            /tmp/build/bin/llama-gguf-split --merge "${PART1}" "${target}"
             
-            # Retrieve PROJECT_DIR dynamically since it's not exported globally here
-            LOCAL_PROJECT_DIR="$(cd "${GGUF_DIR}/../../" && pwd)"
-            
-            apptainer exec \
-                --bind "${LOCAL_PROJECT_DIR}:${LOCAL_PROJECT_DIR}" \
-                --env "LD_LIBRARY_PATH=/app:/usr/local/lib" \
-                "${LOCAL_PROJECT_DIR}/llamacpp.sif" \
-                /app/llama-gguf-split --merge "${PART1}" "${target}" 2>/dev/null || \
-            apptainer exec \
-                --bind "${LOCAL_PROJECT_DIR}:${LOCAL_PROJECT_DIR}" \
-                --env "LD_LIBRARY_PATH=/app:/usr/local/lib" \
-                "${LOCAL_PROJECT_DIR}/llamacpp.sif" \
-                llama-gguf-split --merge "${PART1}" "${target}" 2>/dev/null || \
-            apptainer exec \
-                --bind "${LOCAL_PROJECT_DIR}:${LOCAL_PROJECT_DIR}" \
-                "${LOCAL_PROJECT_DIR}/llamacpp.sif" \
-                sh -c "find / -type f -name llama-gguf-split -executable 2>/dev/null | head -1 | xargs -I{} {} --merge '${PART1}' '${target}'"
-                
-            echo "  Cleaning up split parts..."
-            rm -rf "${GGUF_DIR}/Q4_K_M"
+            if [[ -f "${target}" ]]; then
+                echo "  Cleaning up split parts and temporary binaries..."
+                rm -rf "${GGUF_DIR}/Q4_K_M"
+                rm -rf /tmp/llama-bin.tar.gz /tmp/build
+                echo "✓ Successfully merged to ${target}"
+            else
+                echo "ERROR: Merge failed!" >&2
+            fi
         else
              echo "ERROR: Failed to find the downloaded split file at ${PART1}" >&2
              exit 1
