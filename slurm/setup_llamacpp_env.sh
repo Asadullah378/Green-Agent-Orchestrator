@@ -177,7 +177,13 @@ cd "${LLAMA_CPP_SRC}"
 
 echo "Compiling with CMake (GGML_CUDA=ON, targeting sm_80 for A100)..."
 rm -rf build
-cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="80" -DCMAKE_BUILD_TYPE=Release
+# Provide explicit stubs path so the linker can find libcuda.so
+cmake -B build \
+    -DGGML_CUDA=ON \
+    -DCMAKE_CUDA_ARCHITECTURES="80" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCUDA_cuda_LIBRARY=/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/targets/x86_64-linux/lib/stubs/libcuda.so
+
 cmake --build build --config Release -j 8 --target llama-server
 
 if [[ ! -f "build/bin/llama-server" ]]; then
