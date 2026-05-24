@@ -245,6 +245,9 @@ if [[ "${GAO_SKIP_LLAMACPP_DIAGNOSTIC:-0}" != "1" ]]; then
     # it was compiled specifically with Mahti's CUDA 12.6.1 and gcc modules.
     module load gcc/10.4.0 cuda/12.6.1 >/dev/null 2>&1 || true
     
+    # Export LD_LIBRARY_PATH to ensure libcuda.so and other libs are found correctly at runtime
+    export LD_LIBRARY_PATH="/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/targets/x86_64-linux/lib:/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/lib64:${LD_LIBRARY_PATH:-}"
+
     "${PROJECT_DIR}/bin/llama-server-native" \
         --model "${SMALL_GGUF}" \
         --port 19999 \
@@ -326,6 +329,7 @@ fi
 # We just need to ensure the correct modules are loaded.
 # ---------------------------------------------------------------------------
 module load gcc/10.4.0 cuda/12.6.1 >/dev/null 2>&1 || true
+export LD_LIBRARY_PATH="/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/targets/x86_64-linux/lib:/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/lib64:${LD_LIBRARY_PATH:-}"
 
 # Update the rendered swap config to point to the native binary
 sed -E -i \
