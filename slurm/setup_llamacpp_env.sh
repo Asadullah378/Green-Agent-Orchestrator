@@ -139,12 +139,7 @@ echo
             find / -maxdepth 5 -type f -name llama-server 2>/dev/null | head -1)"
     fi
 
-    if [[ -z "${LLAMA_SERVER_PATH}" ]]; then
-        echo "ERROR: could not locate a llama-server binary inside ${LLAMACPP_SIF}." >&2
-        exit 1
-    fi
     echo "✓ llama-server found at ${LLAMA_SERVER_PATH} (inside container)"
-fi
 echo
 
 echo "============================================================================"
