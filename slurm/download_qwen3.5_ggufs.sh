@@ -138,17 +138,20 @@ PY
         PART1="${GGUF_DIR}/Q4_K_M/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf"
         if [[ -f "${PART1}" ]]; then
             echo "  Downloading standalone llama-gguf-split binary..."
-            curl -fsSL "https://github.com/ggml-org/llama.cpp/releases/download/b8329/llama-b8329-bin-ubuntu-x64.tar.gz" -o /tmp/llama-bin.tar.gz
-            tar -xzf /tmp/llama-bin.tar.gz -C /tmp
-            chmod +x /tmp/build/bin/llama-gguf-split
+            
+            # Create a dedicated temp directory to avoid tar permission errors
+            TMP_EXTRACT="$(mktemp -d)"
+            curl -fsSL "https://github.com/ggml-org/llama.cpp/releases/download/b8329/llama-b8329-bin-ubuntu-x64.tar.gz" -o "${TMP_EXTRACT}/llama-bin.tar.gz"
+            tar -xzf "${TMP_EXTRACT}/llama-bin.tar.gz" -C "${TMP_EXTRACT}"
+            chmod +x "${TMP_EXTRACT}/build/bin/llama-gguf-split"
 
             echo "  Merging split GGUF files (this may take a few minutes for 70GB)..."
-            /tmp/build/bin/llama-gguf-split --merge "${PART1}" "${target}"
+            "${TMP_EXTRACT}/build/bin/llama-gguf-split" --merge "${PART1}" "${target}"
             
             if [[ -f "${target}" ]]; then
                 echo "  Cleaning up split parts and temporary binaries..."
                 rm -rf "${GGUF_DIR}/Q4_K_M"
-                rm -rf /tmp/llama-bin.tar.gz /tmp/build
+                rm -rf "${TMP_EXTRACT}"
                 echo "✓ Successfully merged to ${target}"
             else
                 echo "ERROR: Merge failed!" >&2
