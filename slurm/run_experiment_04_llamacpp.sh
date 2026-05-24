@@ -258,6 +258,22 @@ if [[ "${GAO_SKIP_LLAMACPP_DIAGNOSTIC:-0}" != "1" ]]; then
         if curl -fs http://127.0.0.1:19999/health > /dev/null 2>&1; then
             diag_ok=1
             echo "  ✓ llama-server diagnostic OK — model loaded and /health responded."
+            
+            echo "  Running a quick generation test..."
+            curl_out=$(curl -s -X POST http://127.0.0.1:19999/v1/chat/completions \
+                -H "Content-Type: application/json" \
+                -d '{"model": "qwen", "messages": [{"role": "user", "content": "Say hello!"}], "max_tokens": 10}')
+            if echo "${curl_out}" | grep -q "choices"; then
+                echo "  ✓ Generation test OK — generated response successfully."
+            else
+                cat >&2 <<EOF
+
+ERROR: llama-server generation test failed. Response:
+${curl_out}
+EOF
+                exit 1
+            fi
+            
             break
         fi
         if ! kill -0 "${DIAG_PID}" 2>/dev/null; then
