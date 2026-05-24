@@ -154,8 +154,18 @@ PY
             
             chmod +x "${BIN_PATH}"
 
-            echo "  Merging split GGUF files (this may take a few minutes for 70GB)..."
-            "${BIN_PATH}" --merge "${PART1}" "${target}"
+            echo "  Merging split GGUF files using Apptainer (this may take a few minutes for 70GB)..."
+            
+            LOCAL_PROJECT_DIR="$(cd "${GGUF_DIR}/../../" && pwd)"
+            
+            # Use Apptainer to run the downloaded binary inside an Ubuntu 24.04 environment (which has GLIBC 2.34)
+            # using the local binary we downloaded, since Mahti's host OS is too old.
+            apptainer exec \
+                --bind "${LOCAL_PROJECT_DIR}:${LOCAL_PROJECT_DIR}" \
+                --bind "${TMP_EXTRACT}:${TMP_EXTRACT}" \
+                --env "LD_LIBRARY_PATH=${TMP_EXTRACT}/llama-b8329" \
+                docker://ubuntu:24.04 \
+                "${BIN_PATH}" --merge "${PART1}" "${target}"
             
             if [[ -f "${target}" ]]; then
                 echo "  Cleaning up split parts and temporary binaries..."
