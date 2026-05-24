@@ -144,10 +144,14 @@ PY
         PART1="${GGUF_DIR}/Q4_K_M/Qwen3.5-122B-A10B-Q4_K_M-00001-of-00003.gguf"
         if [[ -f "${PART1}" ]]; then
             echo "  Merging split GGUF files..."
+            
+            # Retrieve PROJECT_DIR dynamically since it's not exported globally here
+            LOCAL_PROJECT_DIR="$(cd "${GGUF_DIR}/../../" && pwd)"
+            
             apptainer exec \
-                --bind "${PROJECT_DIR}:${PROJECT_DIR}" \
+                --bind "${LOCAL_PROJECT_DIR}:${LOCAL_PROJECT_DIR}" \
                 --env "LD_LIBRARY_PATH=/app:/usr/local/lib" \
-                "${PROJECT_DIR}/llamacpp.sif" \
+                "${LOCAL_PROJECT_DIR}/llamacpp.sif" \
                 /app/llama-gguf-split --merge "${PART1}" "${target}"
                 
             echo "  Cleaning up split parts..."
