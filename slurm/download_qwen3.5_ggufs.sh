@@ -78,7 +78,7 @@ for lower in ${GAO_GGUF_SIZES}; do
         9b)   upper="9B"   ;;
         27b)  upper="27B"  ;;
         35b)  upper="35B"  ;;
-        122b) upper="122B" ;;
+        122b) upper="122B-A10B" ;;
         *)
             echo "ERROR: unknown size '${lower}' in GAO_GGUF_SIZES" >&2
             exit 1
