@@ -333,7 +333,7 @@ export LD_LIBRARY_PATH="/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tau
 
 # Update the rendered swap config to point to the native binary
 sed -E -i \
-    -e "s#cmd: >\s*llama-server#cmd: >\n      ${PROJECT_DIR}/bin/llama-server-native#g" \
+    -e "s#^[[:space:]]*llama-server\$#      ${PROJECT_DIR}/bin/llama-server-native#g" \
     "${RENDERED_SWAP_CONFIG}"
 
 echo "Starting llama-swap proxy on :8080…"
