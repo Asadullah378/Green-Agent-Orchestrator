@@ -22,19 +22,15 @@ echo "✓ Apptainer caches cleared."
 echo
 
 echo "=========================================================="
-echo "2. Deleting old GGUF files no longer used in Exp 04"
+echo "2. Deleting GGUF files (Exp 04)"
 echo "=========================================================="
-OLD_GGUF="${PROJECT_DIR}/gguf/qwen3.5/qwen3.5-27b-instruct-q4_k_m.gguf"
-if [[ -f "$OLD_GGUF" ]]; then
-    rm -f "$OLD_GGUF"
-    echo "✓ Deleted $OLD_GGUF"
-else
-    echo "✓ No old GGUFs found."
-fi
+# Delete all GGUF models to free up space (~70GB for 122B alone)
+rm -f "${PROJECT_DIR}/gguf/qwen3.5/"*.gguf 2>/dev/null || true
+echo "✓ Cleared GGUF directory."
 echo
 
 echo "=========================================================="
-echo "3. Removing old Ollama models"
+echo "3. Removing Ollama models"
 echo "=========================================================="
 echo "Starting Ollama server temporarily..."
 apptainer run \
@@ -47,7 +43,10 @@ OLLAMA_PID=$!
 # Wait for Ollama to boot
 sleep 5
 
+# Comprehensive list of all models used in the experiments (old and new).
+# Running this script will completely reset your Ollama model storage.
 MODELS_TO_REMOVE=(
+    # --- Old / obsolete models ---
     "mistral-small:24b"
     "mistral-large:latest"
     "gemma4:31b"
@@ -55,6 +54,26 @@ MODELS_TO_REMOVE=(
     "gemma4:e4b"
     "gemma4:e2b"
     "qwen3.5:27b-q4_K_M"
+
+    # --- Qwen 3.5 family (Exp 01, 02, 03) ---
+    "qwen3.5:122b"
+    "qwen3.5:35b"
+    "qwen3.5:27b"
+    "qwen3.5:9b"
+    "qwen3.5:4b"
+    "qwen3.5:2b"
+
+    # --- Mistral family (Exp 05) ---
+    "mistral-medium-3.5:128b"
+    "ministral-3:14b"
+    "ministral-3:8b"
+    "ministral-3:3b"
+
+    # --- Gemma 3 family (Exp 06) ---
+    "gemma3:27b"
+    "gemma3:4b"
+    "gemma3:1b"
+    "gemma3:270m"
 )
 
 for model in "${MODELS_TO_REMOVE[@]}"; do
@@ -75,4 +94,10 @@ echo
 echo "=========================================================="
 echo "Current disk usage in ${PROJECT_DIR}:"
 echo "=========================================================="
-du -sh "${PROJECT_DIR}/"* | sort -h
+du -sh "${PROJECT_DIR}"/* | sort -h
+echo
+echo "=========================================================="
+echo "Overall project quota usage:"
+echo "=========================================================="
+csc-workspaces
+
