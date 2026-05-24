@@ -152,7 +152,16 @@ PY
                 --bind "${LOCAL_PROJECT_DIR}:${LOCAL_PROJECT_DIR}" \
                 --env "LD_LIBRARY_PATH=/app:/usr/local/lib" \
                 "${LOCAL_PROJECT_DIR}/llamacpp.sif" \
-                /app/llama-gguf-split --merge "${PART1}" "${target}"
+                /app/llama-gguf-split --merge "${PART1}" "${target}" 2>/dev/null || \
+            apptainer exec \
+                --bind "${LOCAL_PROJECT_DIR}:${LOCAL_PROJECT_DIR}" \
+                --env "LD_LIBRARY_PATH=/app:/usr/local/lib" \
+                "${LOCAL_PROJECT_DIR}/llamacpp.sif" \
+                llama-gguf-split --merge "${PART1}" "${target}" 2>/dev/null || \
+            apptainer exec \
+                --bind "${LOCAL_PROJECT_DIR}:${LOCAL_PROJECT_DIR}" \
+                "${LOCAL_PROJECT_DIR}/llamacpp.sif" \
+                sh -c "find / -type f -name llama-gguf-split -executable 2>/dev/null | head -1 | xargs -I{} {} --merge '${PART1}' '${target}'"
                 
             echo "  Cleaning up split parts..."
             rm -rf "${GGUF_DIR}/Q4_K_M"
