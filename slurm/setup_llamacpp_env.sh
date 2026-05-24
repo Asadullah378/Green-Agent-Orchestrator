@@ -58,14 +58,14 @@ LLAMA_SWAP_BIN="${LLAMA_SWAP_BIN:-${PROJECT_DIR}/bin/llama-swap}"
 #     merged Feb 9, 2026), and
 #   * still uses CUDA 12.4 (the docker default until ~late March 2026).
 #
-# b5523 (2025-05-20) ships with CUDA 12.4 and works on Mahti.
+# b5522 (2025-05-20) ships with CUDA 12.4 and works on Mahti.
 # Bump cautiously: every build after roughly b8400 may be on CUDA 12.8/12.9
 # and crash the same way again. Verify with:
 #     apptainer exec llamacpp.sif llama-server --version  (look at ARCHS)
 # A safe build emits ARCHS containing 800 (sm_80, the A100) WITHOUT 1200
 # (sm_120, Blackwell — that requires CUDA 12.8+).
 # -----------------------------------------------------------------------------
-LLAMACPP_IMAGE_TAG="${LLAMACPP_IMAGE_TAG:-server-cuda-b5523}"
+LLAMACPP_IMAGE_TAG="${LLAMACPP_IMAGE_TAG:-server-cuda-b5522}"
 LLAMACPP_IMAGE="${LLAMACPP_IMAGE:-docker://ghcr.io/ggml-org/llama.cpp:${LLAMACPP_IMAGE_TAG}}"
 
 # Pin to a known-good llama-swap release. Bump as needed — see
