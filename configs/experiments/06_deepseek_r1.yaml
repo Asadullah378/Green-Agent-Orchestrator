@@ -1,26 +1,26 @@
 # ============================================================================
-# Experiment 06 — Gemma 3 family
+# Experiment 06 — DeepSeek R1 family
 # ============================================================================
-# Cross-architecture replication using Google's Gemma 3 models.
+# Cross-architecture replication using DeepSeek R1 models.
 #
 # Pull the models before running:
-#   ollama pull gemma3:27b
-#   ollama pull gemma3:270m
-#   ollama pull gemma3:1b
-#   ollama pull gemma3:4b
+#   ollama pull deepseek-r1:70b
+#   ollama pull deepseek-r1:1.5b
+#   ollama pull deepseek-r1:7b
+#   ollama pull deepseek-r1:8b
 #
 # Run:
-#   python -m src.run_experiment --config configs/experiments/06_gemma4.yaml
+#   python -m src.run_experiment --config configs/experiments/06_deepseek_r1.yaml
 # ============================================================================
 
 experiment:
-  name: "06_gemma4"
+  name: "06_deepseek_r1"
   num_runs: 7
-  results_dir: "results/06_gemma4"
+  results_dir: "results/06_deepseek_r1"
 
 llm:
   provider: "ollama"
-  request_timeout: 360
+  request_timeout: 600
   temperature: 0.0
   reasoning: false
 
@@ -37,33 +37,33 @@ energy:
   tracking_mode: "process"
 
 homogeneous:
-  model: "gemma3:27b"
-  size_b: 27
+  model: "deepseek-r1:70b"
+  size_b: 70
   max_agent_steps: 40
 
 heterogeneous:
   orchestrator:
-    model: "gemma3:4b"
-    size_b: 4
+    model: "deepseek-r1:8b"
+    size_b: 8
 
   synthesizer:
-    model: "gemma3:270m"
-    size_b: 1                    # ~270M params (stored as 1B for int size_b field)
+    model: "deepseek-r1:1.5b"
+    size_b: 1
 
   workers:
     - tier: "small"
-      model: "gemma3:270m"
+      model: "deepseek-r1:1.5b"
       size_b: 1
       max_steps: 10
       description: "Simple subtasks — 1 to 2 total tool invocations."
     - tier: "medium"
-      model: "gemma3:1b"
-      size_b: 1
+      model: "deepseek-r1:7b"
+      size_b: 7
       max_steps: 15
       description: "Moderate subtasks — 3 to 5 tool invocations or multi-step math."
     - tier: "large"
-      model: "gemma3:4b"
-      size_b: 4
+      model: "deepseek-r1:8b"
+      size_b: 8
       max_steps: 25
       description: "Complex subtasks — 6 or more tool invocations or advanced reasoning."
 

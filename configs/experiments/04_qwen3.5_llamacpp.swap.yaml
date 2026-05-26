@@ -13,12 +13,12 @@
 # files, and tune `--n-gpu-layers` to match your hardware (use 0 for CPU).
 # ============================================================================
 
-healthCheckTimeout: 180
+healthCheckTimeout: 1200
 logRequests: false
 
 # How long an unused model is kept loaded before unloading (seconds).
 # Lower this if you are tight on memory.
-defaultTtlSeconds: 600
+defaultTtlSeconds: 1200
 
 models:
   qwen3.5-2b:

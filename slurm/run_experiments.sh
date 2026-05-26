@@ -23,7 +23,7 @@
 #   sbatch slurm/run_experiment_02_qwen3.5_homo_9b.sh
 #   sbatch slurm/run_experiment_03_qwen3.5_homo_4b.sh
 #   sbatch slurm/run_experiment_05_mistral.sh        # gpumedium, 4× A100
-#   sbatch slurm/run_experiment_06_gemma4.sh
+#   sbatch slurm/run_experiment_06_deepseek_r1.sh
 #
 # ============================================================================
 
@@ -84,9 +84,9 @@ case "${SLURM_ARRAY_TASK_ID:-1}" in
     ;;
   6)
     run_gao_experiment \
-        "06_gemma4" \
-        "configs/experiments/06_gemma4.yaml" \
-        gemma3:27b gemma3:4b gemma3:1b gemma3:270m
+        "06_deepseek_r1" \
+        "configs/experiments/06_deepseek_r1.yaml" \
+        deepseek-r1:70b deepseek-r1:8b deepseek-r1:7b deepseek-r1:1.5b
     ;;
   *)
     echo "Unknown SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-} (expected 1,2,3,5,6)" >&2

@@ -27,7 +27,7 @@ experiment:
 
 llm:
   provider: "llamacpp"
-  request_timeout: 600
+  request_timeout: 1200
   temperature: 0.0
   reasoning: false
 

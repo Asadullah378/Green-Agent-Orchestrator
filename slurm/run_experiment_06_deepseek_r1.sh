@@ -1,11 +1,11 @@
 #!/bin/bash
 # ============================================================================
-# GAO — Standalone runner for experiment 06_gemma4
+# GAO — Standalone runner for experiment 06_deepseek_r1
 # ============================================================================
-# Gemma 3 family: 27B homogeneous, 270M / 1B / 4B heterogeneous pool.
+# DeepSeek R1 family: 70B homogeneous, 1.5B / 7B / 8B heterogeneous pool.
 #
 # Submit with:
-#   sbatch slurm/run_experiment_06_gemma4.sh
+#   sbatch slurm/run_experiment_06_deepseek_r1.sh
 # ============================================================================
 
 #SBATCH --job-name=gao-exp06
@@ -29,6 +29,6 @@ fi
 source "${SCRIPT_DIR}/_run_experiment_common.sh"
 
 run_gao_experiment \
-    "06_gemma4" \
-    "configs/experiments/06_gemma4.yaml" \
-    gemma3:27b gemma3:4b gemma3:1b gemma3:270m
+    "06_deepseek_r1" \
+    "configs/experiments/06_deepseek_r1.yaml" \
+    deepseek-r1:70b deepseek-r1:8b deepseek-r1:7b deepseek-r1:1.5b
