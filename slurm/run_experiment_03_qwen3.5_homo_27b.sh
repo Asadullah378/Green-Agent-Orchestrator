@@ -1,26 +1,23 @@
 #!/bin/bash
 # ============================================================================
-# GAO — Standalone runner for experiment 01_qwen3.5_default
+# GAO — Standalone runner for experiment 03_qwen3.5_homo_27b
 # ============================================================================
-# Homogeneous baseline: qwen3.5:122b (~70 GB Q4). Uses gpumedium (4× A100).
+# Homogeneous baseline: qwen3.5:27b. gpumedium (4× A100 per Mahti policy).
 #
 # Submit with:
-#   sbatch slurm/run_experiment_01_qwen3.5_default.sh
-#
-# Equivalent to:
-#   sbatch --array=1 slurm/run_experiments.sh
+#   sbatch slurm/run_experiment_03_qwen3.5_homo_27b.sh
 # ============================================================================
 
-#SBATCH --job-name=gao-exp01
+#SBATCH --job-name=gao-exp03
 #SBATCH --account=project_2013898
 #SBATCH --partition=gpumedium
-#SBATCH --time=24:00:00
+#SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=128
 #SBATCH --gres=gpu:a100:4
-#SBATCH --output=slurm/logs/exp01_%j.out
-#SBATCH --error=slurm/logs/exp01_%j.err
+#SBATCH --output=slurm/logs/exp03_%j.out
+#SBATCH --error=slurm/logs/exp03_%j.err
 
 set -euo pipefail
 if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
@@ -32,6 +29,6 @@ fi
 source "${SCRIPT_DIR}/_run_experiment_common.sh"
 
 run_gao_experiment \
-    "01_qwen3.5_default" \
-    "configs/experiments/01_qwen3.5_default.yaml" \
-    qwen3.5:122b qwen3.5:9b qwen3.5:4b qwen3.5:2b
+    "03_qwen3.5_homo_27b" \
+    "configs/experiments/03_qwen3.5_homo_27b.yaml" \
+    qwen3.5:27b qwen3.5:9b qwen3.5:4b qwen3.5:2b

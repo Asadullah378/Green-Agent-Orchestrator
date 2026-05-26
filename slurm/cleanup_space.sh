@@ -54,6 +54,10 @@ MODELS_TO_REMOVE=(
     "gemma4:e4b"
     "gemma4:e2b"
     "qwen3.5:27b-q4_K_M"
+    "gemma3:27b"
+    "gemma3:4b"
+    "gemma3:1b"
+    "gemma3:270m"
 
     # --- Qwen 3.5 family (Exp 01, 02, 03) ---
     "qwen3.5:122b"
@@ -69,11 +73,11 @@ MODELS_TO_REMOVE=(
     "ministral-3:8b"
     "ministral-3:3b"
 
-    # --- Gemma 3 family (Exp 06) ---
-    "gemma3:27b"
-    "gemma3:4b"
-    "gemma3:1b"
-    "gemma3:270m"
+    # --- DeepSeek R1 family (Exp 06) ---
+    "deepseek-r1:70b"
+    "deepseek-r1:8b"
+    "deepseek-r1:7b"
+    "deepseek-r1:1.5b"
 )
 
 for model in "${MODELS_TO_REMOVE[@]}"; do

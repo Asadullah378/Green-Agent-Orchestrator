@@ -9,9 +9,9 @@
 # ============================================================================
 
 experiment:
-  name: "03_qwen3.5_homo_4b"
+  name: "03_qwen3.5_homo_27b"
   num_runs: 7
-  results_dir: "results/03_qwen3.5_homo_4b"
+  results_dir: "results/03_qwen3.5_homo_27b"
 
 llm:
   provider: "ollama"

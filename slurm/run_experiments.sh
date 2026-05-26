@@ -19,9 +19,9 @@
 #
 # Or use the per-experiment standalone wrappers — useful when you only
 # want to re-run one experiment without touching the others:
-#   sbatch slurm/run_experiment_01_qwen3.5_default.sh
-#   sbatch slurm/run_experiment_02_qwen3.5_homo_9b.sh
-#   sbatch slurm/run_experiment_03_qwen3.5_homo_4b.sh
+#   sbatch slurm/run_experiment_01_qwen3.5_homo_122b.sh
+#   sbatch slurm/run_experiment_02_qwen3.5_homo_35b.sh
+#   sbatch slurm/run_experiment_03_qwen3.5_homo_27b.sh
 #   sbatch slurm/run_experiment_05_mistral.sh        # gpumedium, 4× A100
 #   sbatch slurm/run_experiment_06_deepseek_r1.sh
 #
@@ -60,20 +60,20 @@ source "${SCRIPT_DIR}/_run_experiment_common.sh"
 case "${SLURM_ARRAY_TASK_ID:-1}" in
   1)
     run_gao_experiment \
-        "01_qwen3.5_default" \
-        "configs/experiments/01_qwen3.5_default.yaml" \
+        "01_qwen3.5_homo_122b" \
+        "configs/experiments/01_qwen3.5_homo_122b.yaml" \
         qwen3.5:122b qwen3.5:9b qwen3.5:4b qwen3.5:2b
     ;;
   2)
     run_gao_experiment \
-        "02_qwen3.5_homo_9b" \
-        "configs/experiments/02_qwen3.5_homo_9b.yaml" \
+        "02_qwen3.5_homo_35b" \
+        "configs/experiments/02_qwen3.5_homo_35b.yaml" \
         qwen3.5:35b qwen3.5:9b qwen3.5:4b qwen3.5:2b
     ;;
   3)
     run_gao_experiment \
-        "03_qwen3.5_homo_4b" \
-        "configs/experiments/03_qwen3.5_homo_4b.yaml" \
+        "03_qwen3.5_homo_27b" \
+        "configs/experiments/03_qwen3.5_homo_27b.yaml" \
         qwen3.5:27b qwen3.5:9b qwen3.5:4b qwen3.5:2b
     ;;
   5)
