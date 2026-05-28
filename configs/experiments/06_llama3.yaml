@@ -1,22 +1,22 @@
 # ============================================================================
-# Experiment 06 — DeepSeek R1 family
+# Experiment 06 — Llama 3 family
 # ============================================================================
-# Cross-architecture replication using DeepSeek R1 models.
+# Cross-architecture replication using Meta's Llama 3.1 / 3.2 models.
 #
 # Pull the models before running:
-#   ollama pull deepseek-r1:70b
-#   ollama pull deepseek-r1:1.5b
-#   ollama pull deepseek-r1:7b
-#   ollama pull deepseek-r1:8b
+#   ollama pull llama3.1:70b
+#   ollama pull llama3.2:1b
+#   ollama pull llama3.2:3b
+#   ollama pull llama3.1:8b
 #
 # Run:
-#   python -m src.run_experiment --config configs/experiments/06_deepseek_r1.yaml
+#   python -m src.run_experiment --config configs/experiments/06_llama3.yaml
 # ============================================================================
 
 experiment:
-  name: "06_deepseek_r1"
+  name: "06_llama3"
   num_runs: 7
-  results_dir: "results/06_deepseek_r1"
+  results_dir: "results/06_llama3"
 
 llm:
   provider: "ollama"
@@ -37,32 +37,32 @@ energy:
   tracking_mode: "process"
 
 homogeneous:
-  model: "deepseek-r1:70b"
+  model: "llama3.1:70b"
   size_b: 70
   max_agent_steps: 40
 
 heterogeneous:
   orchestrator:
-    model: "deepseek-r1:8b"
+    model: "llama3.1:8b"
     size_b: 8
 
   synthesizer:
-    model: "deepseek-r1:1.5b"
+    model: "llama3.2:1b"
     size_b: 1
 
   workers:
     - tier: "small"
-      model: "deepseek-r1:1.5b"
+      model: "llama3.2:1b"
       size_b: 1
       max_steps: 10
       description: "Simple subtasks — 1 to 2 total tool invocations."
     - tier: "medium"
-      model: "deepseek-r1:7b"
-      size_b: 7
+      model: "llama3.2:3b"
+      size_b: 3
       max_steps: 15
       description: "Moderate subtasks — 3 to 5 tool invocations or multi-step math."
     - tier: "large"
-      model: "deepseek-r1:8b"
+      model: "llama3.1:8b"
       size_b: 8
       max_steps: 25
       description: "Complex subtasks — 6 or more tool invocations or advanced reasoning."

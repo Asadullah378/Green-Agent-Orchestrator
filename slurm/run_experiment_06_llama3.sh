@@ -1,11 +1,11 @@
 #!/bin/bash
 # ============================================================================
-# GAO — Standalone runner for experiment 06_deepseek_r1
+# GAO — Standalone runner for experiment 06_llama3
 # ============================================================================
-# DeepSeek R1 family: 70B homogeneous, 1.5B / 7B / 8B heterogeneous pool.
+# Llama 3.1 / 3.2 family: 70B homogeneous, 1B / 3B / 8B heterogeneous pool.
 #
 # Submit with:
-#   sbatch slurm/run_experiment_06_deepseek_r1.sh
+#   sbatch slurm/run_experiment_06_llama3.sh
 # ============================================================================
 
 #SBATCH --job-name=gao-exp06
@@ -29,6 +29,6 @@ fi
 source "${SCRIPT_DIR}/_run_experiment_common.sh"
 
 run_gao_experiment \
-    "06_deepseek_r1" \
-    "configs/experiments/06_deepseek_r1.yaml" \
-    deepseek-r1:70b deepseek-r1:8b deepseek-r1:7b deepseek-r1:1.5b
+    "06_llama3" \
+    "configs/experiments/06_llama3.yaml" \
+    llama3.1:70b llama3.1:8b llama3.2:3b llama3.2:1b

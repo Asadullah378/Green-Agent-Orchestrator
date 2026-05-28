@@ -73,11 +73,11 @@ MODELS_TO_REMOVE=(
     "ministral-3:8b"
     "ministral-3:3b"
 
-    # --- DeepSeek R1 family (Exp 06) ---
-    "deepseek-r1:70b"
-    "deepseek-r1:8b"
-    "deepseek-r1:7b"
-    "deepseek-r1:1.5b"
+    # --- Llama 3 family (Exp 06) ---
+    "llama3.1:70b"
+    "llama3.1:8b"
+    "llama3.2:3b"
+    "llama3.2:1b"
 )
 
 for model in "${MODELS_TO_REMOVE[@]}"; do

@@ -23,7 +23,7 @@
 #   sbatch slurm/run_experiment_02_qwen3.5_homo_35b.sh
 #   sbatch slurm/run_experiment_03_qwen3.5_homo_27b.sh
 #   sbatch slurm/run_experiment_05_mistral.sh        # gpumedium, 4× A100
-#   sbatch slurm/run_experiment_06_deepseek_r1.sh
+#   sbatch slurm/run_experiment_06_llama3.sh
 #
 # ============================================================================
 
@@ -84,9 +84,9 @@ case "${SLURM_ARRAY_TASK_ID:-1}" in
     ;;
   6)
     run_gao_experiment \
-        "06_deepseek_r1" \
-        "configs/experiments/06_deepseek_r1.yaml" \
-        deepseek-r1:70b deepseek-r1:8b deepseek-r1:7b deepseek-r1:1.5b
+        "06_llama3" \
+        "configs/experiments/06_llama3.yaml" \
+        llama3.1:70b llama3.1:8b llama3.2:3b llama3.2:1b
     ;;
   *)
     echo "Unknown SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-} (expected 1,2,3,5,6)" >&2
